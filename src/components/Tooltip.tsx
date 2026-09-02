@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './Tooltip.css';
@@ -27,38 +27,67 @@ import './Tooltip.css';
  *  structure (a title, a description, a safety note), not one run-on sentence. Existing plain-string
  *  callers keep working untouched, since a string is itself a valid ReactNode.
  */
-export function Tooltip({ text, children }: { text: ReactNode; children: ReactNode }) {
+export function Tooltip({
+  text,
+  children,
+  wide = false,
+}: {
+  text: ReactNode;
+  children: ReactNode;
+  wide?: boolean;
+}) {
   const triggerRef = useRef<HTMLSpanElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; openDown: boolean } | null>(null);
+  const bubbleRef = useRef<HTMLSpanElement>(null);
+  const [anchor, setAnchor] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   function show() {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const margin = 8;
-    const estimatedWidth = Math.min(320, window.innerWidth - margin * 2);
-    const left = Math.min(
-      Math.max(rect.left + rect.width / 2 - estimatedWidth / 2, margin),
-      window.innerWidth - estimatedWidth - margin,
-    );
-    const openDown = rect.top < 90; // not enough room above when this close to a modal header
-    setPos({ top: openDown ? rect.bottom + 8 : rect.top - 8, left, openDown });
+    setAnchor({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
+    setPos(null);
   }
+
+  function hide() {
+    setAnchor(null);
+    setPos(null);
+  }
+
+  useLayoutEffect(() => {
+    if (!anchor || !bubbleRef.current) return;
+    const margin = 8;
+    const gap = 8;
+    const rect = bubbleRef.current.getBoundingClientRect();
+    const spaceAbove = anchor.top - margin;
+    const spaceBelow = window.innerHeight - anchor.bottom - margin;
+    const openDown = spaceBelow >= rect.height + gap || spaceBelow >= spaceAbove;
+    const idealTop = openDown ? anchor.bottom + gap : anchor.top - rect.height - gap;
+    const top = Math.min(Math.max(idealTop, margin), window.innerHeight - rect.height - margin);
+    const idealLeft = anchor.left + anchor.width / 2 - rect.width / 2;
+    const left = Math.min(Math.max(idealLeft, margin), window.innerWidth - rect.width - margin);
+    setPos({ top, left });
+  }, [anchor, text, wide]);
 
   return (
     <span
       ref={triggerRef}
       className="tt-trigger"
       onMouseEnter={show}
-      onMouseLeave={() => setPos(null)}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      onKeyDown={(event) => { if (event.key === 'Escape') hide(); }}
     >
       {children}
-      {pos && createPortal(
+      {anchor && createPortal(
         <span
-          className="tt-bubble"
+          ref={bubbleRef}
+          role="tooltip"
+          className={`tt-bubble${wide ? ' tt-bubble--wide' : ''}`}
           style={{
-            left: pos.left,
-            top: pos.openDown ? pos.top : undefined,
-            bottom: pos.openDown ? undefined : window.innerHeight - pos.top,
+            left: pos?.left ?? 8,
+            top: pos?.top ?? 8,
+            visibility: pos ? 'visible' : 'hidden',
           }}
         >
           {text}
@@ -74,11 +103,35 @@ export function Tooltip({ text, children }: { text: ReactNode; children: ReactNo
  *  buried in the description prose. Pulled out so the Backlog row's two explainer icons (health check,
  *  recovery) render from the same layout instead of two hand-built JSX blocks that could drift apart
  *  in spacing or hierarchy. */
-export function TooltipExplainer({ title, description, note }: { title: string; description: string; note?: string }) {
+export function TooltipExplainer({
+  title,
+  description,
+  criteria = [],
+  comparison,
+  note,
+}: {
+  title: string;
+  description: string;
+  criteria?: Array<{ label: string; description: string; example?: string }>;
+  comparison?: string;
+  note?: string;
+}) {
   return (
     <span className="tt-bubble__content">
       <span className="tt-bubble__title">{title}</span>
       <span className="tt-bubble__desc">{description}</span>
+      {criteria.length > 0 && (
+        <span className="tt-bubble__criteria">
+          {criteria.map((criterion) => (
+            <span className="tt-bubble__criterion" key={criterion.label}>
+              <strong>{criterion.label}</strong>
+              <span>{criterion.description}</span>
+              {criterion.example && <em>{criterion.example}</em>}
+            </span>
+          ))}
+        </span>
+      )}
+      {comparison && <span className="tt-bubble__comparison">{comparison}</span>}
       {note && <span className="tt-bubble__note">{note}</span>}
     </span>
   );

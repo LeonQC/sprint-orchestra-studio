@@ -5,6 +5,7 @@ import { aiApi } from '../api';
 import type { SprintPaceResponseDto, SprintRiskLevel } from '../api';
 import { computeSprintPaceStats } from '../utils/sprintPaceStats';
 import { IssueKeyChip } from './IssueKeyChip';
+import { AiUsageCard } from './AiUsageCard';
 import './SprintPaceModal.css';
 
 interface SprintPaceModalProps {
@@ -17,6 +18,8 @@ const RISK_META: Record<SprintRiskLevel, { label: string; className: string }> =
   on_track: { label: 'On track', className: 'sp-badge--ok' },
   at_risk: { label: 'At risk', className: 'sp-badge--warn' },
   behind: { label: 'Behind', className: 'sp-badge--danger' },
+  incomplete: { label: 'Pace incomplete', className: 'sp-badge--incomplete' },
+  unavailable: { label: 'Pace unavailable', className: 'sp-badge--neutral' },
 };
 
 export function SprintPaceModal({ sprint, tickets, onClose }: SprintPaceModalProps) {
@@ -77,12 +80,37 @@ export function SprintPaceModal({ sprint, tickets, onClose }: SprintPaceModalPro
           </p>
           <div className="sp-stats">
             <span className={`sp-badge ${risk.className}`}>{risk.label}</span>
-            <span className="sp-stat">{stats.completedPoints}/{stats.totalPoints} pts</span>
+            <span className="sp-stat">
+              {stats.completedPoints}/{stats.totalPoints} {stats.riskLevel === 'incomplete' ? 'estimated pts only' : 'pts'}
+            </span>
             {stats.daysRemaining != null && <span className="sp-stat">{stats.daysRemaining} day{stats.daysRemaining !== 1 ? 's' : ''} left</span>}
             {Object.entries(stats.issueCountsByStatus).map(([status, count]) => (
               <span className="sp-stat sp-stat--muted" key={status}>{count} {status}</span>
             ))}
           </div>
+
+          {stats.riskLevel === 'incomplete' && (
+            <section className="sp-estimate-warning" aria-label="Issues missing story point estimates">
+              <div className="sp-estimate-warning__heading">
+                <span aria-hidden>⚠️</span>
+                <div>
+                  <strong>Pace cannot be rated yet</strong>
+                  <p>
+                    {stats.unestimatedIssues.length} sprint issue{stats.unestimatedIssues.length !== 1 ? 's are' : ' is'} missing
+                    story points. The point total above covers estimated work only, so it cannot describe the whole sprint.
+                  </p>
+                </div>
+              </div>
+              <div className="sp-estimate-warning__issues">
+                {stats.unestimatedIssues.map((issue) => (
+                  <div className="sp-estimate-warning__issue" key={issue.issueKey}>
+                    <IssueKeyChip issueKey={issue.issueKey} size="sm" />
+                    <span>{issue.title}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {loading && (
             <div className="sp-loading">
@@ -110,16 +138,20 @@ export function SprintPaceModal({ sprint, tickets, onClose }: SprintPaceModalPro
                 </div>
               )}
               {!result.degraded && (
-                <p className="sp-hint sp-hint--cost">
-                  {result.inputTokens.toLocaleString()} in / {result.outputTokens.toLocaleString()} out tokens
-                  {' · '}
-                  {result.estimatedCostUsd > 0 ? `$${result.estimatedCostUsd.toFixed(4)}` : 'free (local model)'}
-                </p>
+                <AiUsageCard
+                  title="AI analysis details"
+                  description="Usage for this sprint pace summary"
+                  inputTokens={result.inputTokens}
+                  outputTokens={result.outputTokens}
+                  cachedInputTokens={result.cachedInputTokens}
+                  estimatedCostUsd={result.estimatedCostUsd}
+                  latencySeconds={result.latencySeconds}
+                />
               )}
             </>
           )}
 
-          {(stats.blockedIssues.length > 0 || stats.staleIssues.length > 0 || stats.unestimatedIssues.length > 0) && (
+          {(stats.blockedIssues.length > 0 || stats.staleIssues.length > 0) && (
             <div className="sp-flagged">
               {stats.blockedIssues.length > 0 && (
                 <div className="sp-flagged__group">
@@ -138,16 +170,6 @@ export function SprintPaceModal({ sprint, tickets, onClose }: SprintPaceModalPro
                     <div className="sp-flagged__row" key={i.issueKey}>
                       <IssueKeyChip issueKey={i.issueKey} size="sm" /> <span>{i.title}</span>
                       {i.detail && <span className="sp-flagged__detail">({i.detail})</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {stats.unestimatedIssues.length > 0 && (
-                <div className="sp-flagged__group">
-                  <span className="sp-flagged__label">No estimate</span>
-                  {stats.unestimatedIssues.map((i) => (
-                    <div className="sp-flagged__row" key={i.issueKey}>
-                      <IssueKeyChip issueKey={i.issueKey} size="sm" /> <span>{i.title}</span>
                     </div>
                   ))}
                 </div>

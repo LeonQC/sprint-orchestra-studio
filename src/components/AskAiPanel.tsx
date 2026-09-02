@@ -5,6 +5,7 @@ import { useSpaces } from '../context/SpaceContext';
 import { aiApi } from '../api';
 import type { AskResponseDto, ChatTurnDto } from '../api';
 import { IssueKeyChip } from './IssueKeyChip';
+import { AiUsageCard } from './AiUsageCard';
 import { formatDuration } from '../utils/formatDuration';
 import './AskAiPanel.css';
 
@@ -34,6 +35,12 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
   const [query, setQuery] = useState('');
   const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<string>>(() => new Set(spaces.map((s) => s.id)));
   const [loading, setLoading] = useState(false);
+  // The question currently in flight, shown as its own bubble above the loading indicator while
+  // waiting — `query` alone can't serve this: a suggested-prompt chip submits via `explicitQuestion`
+  // without ever touching `query`, and `query` isn't cleared until the request actually succeeds, so
+  // either using it directly or clearing it early would desync the input box from what's really
+  // in flight. Cleared in `finally` regardless of outcome, alongside `loading`.
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Latest SSE progress label from askStream's onStage callback (e.g. "searching the knowledge
   // base") — null while idle or before the first event of a request arrives. Replaces a single
@@ -69,6 +76,35 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [conversation.length, loading]);
 
+  // Expanding a Sources/Stage-latency/AI-usage disclosure grows content below wherever the thread
+  // happened to be scrolled — the browser does not adjust scroll position on a <details> toggle, so
+  // the newly revealed block (and everything after it, including the composer) can end up pushed
+  // below the visible frame while the block that was JUST opened sits pinned near the top instead
+  // of staying anchored where the user is looking. Confirmed live: after a few turns with any
+  // disclosure expanded, the scroll position the app's own auto-scroll-to-bottom effect had set
+  // becomes stale the moment a <details> opens, since that effect only re-runs on
+  // `[conversation.length, loading]`, not on this.
+  //
+  // Which behavior to use is decided by whether this is the LATEST turn, not by measuring
+  // scroll-distance-to-bottom at toggle time — the browser has already grown `.aa-scroll` to fit
+  // the newly revealed content by the time the native `toggle` event reaches this handler, so a
+  // distance check here measures the post-expansion gap, not the user's actual position beforehand,
+  // and unreliably misses the common case. "Is this the latest turn" needs no timing assumption:
+  // expanding the latest answer's own metadata (the common case right after asking something) keeps
+  // following the true bottom, composer included; expanding an EARLIER turn's metadata (scrolled up
+  // to review history) only brings that box into view — jumping down to unrelated new content would
+  // be a worse surprise than leaving the view exactly where the user just clicked.
+  function makeDetailsToggleHandler(isLatestTurn: boolean) {
+    return (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+      if (!e.currentTarget.open) return;
+      if (isLatestTurn) {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      } else {
+        e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    };
+  }
+
   const spaceIds = useMemo(
     () => spaces.filter((s) => selectedSpaceIds.has(s.id)).map((s) => Number(s.id)),
     [spaces, selectedSpaceIds],
@@ -88,6 +124,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
     const question = (explicitQuestion ?? query).trim();
     if (!question || loading || spaceIds.length === 0) return;
     setLoading(true);
+    setPendingQuestion(question);
     setError(null);
     setStageLabel(null);
     try {
@@ -98,6 +135,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
       setError(err instanceof Error ? err.message : 'Request failed — try again.');
     } finally {
       setLoading(false);
+      setPendingQuestion(null);
       setStageLabel(null);
     }
   }
@@ -182,17 +220,6 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
               </div>
             )}
 
-            {loading && (
-              <div className="aa-loading">
-                <span className="aa-loading__dot" aria-hidden />
-                <span className="aa-loading__dot" aria-hidden />
-                <span className="aa-loading__dot" aria-hidden />
-                {/* Live progress from the SSE stream (see askStream) once the first event arrives;
-                    falls back to a generic message for the brief gap before it does. */}
-                <span>{stageLabel ? `${stageLabel}…` : 'Retrieving relevant data and reasoning through an answer…'}</span>
-              </div>
-            )}
-
             {error && <p className="aa-error">{error}</p>}
 
             {conversation.length > 0 && (
@@ -222,7 +249,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                           // <details> gives collapse/expand for free — no state, no JS, keyboard/
                           // screen reader accessible by default — matching the "answer first, sources
                           // on demand" pattern most modern chat UIs use over always-open citation dumps.
-                          <details className="aa-citations">
+                          <details className="aa-citations" onToggle={makeDetailsToggleHandler(i === conversation.length - 1)}>
                             <summary className="aa-citations__summary">
                               Sources ({turn.result.citations.length})
                             </summary>
@@ -240,7 +267,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                           // Same collapse-for-free <details> pattern as Sources above — server-
                           // measured wall-clock split, off by default so it doesn't clutter a normal
                           // read of the answer, one click away when latency itself is the question.
-                          <details className="aa-citations">
+                          <details className="aa-citations" onToggle={makeDetailsToggleHandler(i === conversation.length - 1)}>
                             <summary className="aa-citations__summary">Stage latency</summary>
                             <div className="aa-citations__list">
                               <span className="aa-citation__snippet">
@@ -252,10 +279,58 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                             </div>
                           </details>
                         )}
+                        {turn.result.modelUsage && turn.result.modelUsage.length > 0 && (
+                          <details className="aa-citations" onToggle={makeDetailsToggleHandler(i === conversation.length - 1)}>
+                            <summary className="aa-citations__summary">
+                              AI usage
+                              {turn.result.routeTool
+                                ? ` · ${turn.result.routeSource ?? 'route'} → ${turn.result.routeTool}`
+                                : ''}
+                            </summary>
+                            <div className="aa-model-usage-list">
+                              {turn.result.modelUsage.map((usage) => (
+                                <AiUsageCard
+                                  key={`${usage.role}-${usage.provider}-${usage.model}`}
+                                  compact
+                                  title={usage.role === 'router' ? 'Router' : 'Answer agent'}
+                                  description={`${usage.provider} · ${usage.model} · ${usage.deployment === 'local' ? 'Local' : 'Hosted API'}`}
+                                  inputTokens={usage.inputTokens}
+                                  outputTokens={usage.outputTokens}
+                                  cachedInputTokens={usage.cachedInputTokens}
+                                  estimatedCostUsd={usage.estimatedCostUsd}
+                                  pricingStatus={usage.pricingStatus}
+                                />
+                              ))}
+                            </div>
+                          </details>
+                        )}
                       </div>
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* The in-flight question + its loading indicator, rendered AFTER the completed thread
+                (not before it) so a new turn appears where a new turn belongs — right after the
+                last completed one, not stranded above the whole history. Previously this loading
+                block was rendered ahead of `.aa-thread` in JSX order, so it rendered above every
+                completed turn regardless of scroll position — confirmed live: asking a 3rd question
+                showed its "reviewing results…" indicator above turns 1 and 2, not below them, no
+                matter how far down the user had scrolled. */}
+            {loading && (
+              <div className="aa-result">
+                <div className="aa-turn-question__row">
+                  <p className="aa-turn-question">{pendingQuestion}</p>
+                </div>
+                <div className="aa-loading">
+                  <span className="aa-loading__dot" aria-hidden />
+                  <span className="aa-loading__dot" aria-hidden />
+                  <span className="aa-loading__dot" aria-hidden />
+                  {/* Live progress from the SSE stream (see askStream) once the first event arrives;
+                      falls back to a generic message for the brief gap before it does. */}
+                  <span>{stageLabel ? `${stageLabel}…` : 'Retrieving relevant data and reasoning through an answer…'}</span>
+                </div>
               </div>
             )}
 

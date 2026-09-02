@@ -110,6 +110,54 @@
 .sp-badge--ok { background: #dcfce7; color: #15803d; }
 .sp-badge--warn { background: #fef3c7; color: #b45309; }
 .sp-badge--danger { background: #fee2e2; color: #b91c1c; }
+.sp-badge--incomplete { background: #fff7ed; color: #c2410c; }
+.sp-badge--neutral { background: #e2e8f0; color: #475569; }
+
+.sp-estimate-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.8rem;
+  border: 1px solid #fdba74;
+  border-left: 4px solid #f97316;
+  border-radius: 9px;
+  background: #fff7ed;
+  color: #7c2d12;
+}
+
+.sp-estimate-warning__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.sp-estimate-warning__heading strong {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.sp-estimate-warning__heading p {
+  margin: 0;
+  color: #9a3412;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.sp-estimate-warning__issues {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 1.6rem;
+}
+
+.sp-estimate-warning__issue {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #7c2d12;
+}
 
 .sp-stat {
   font-size: 0.78rem;
@@ -150,11 +198,6 @@
   padding: 0.9rem 0.2rem;
   font-size: 0.82rem;
   color: #64748b;
-}
-
-.sp-hint--cost {
-  font-size: 0.72rem;
-  color: #94a3b8;
 }
 
 .sp-hint--warn {

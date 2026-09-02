@@ -591,6 +591,13 @@
   margin-top: 0.5rem;
 }
 
+.aa-model-usage-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.5rem;
+}
+
 .aa-citation {
   display: flex;
   gap: 0.5rem;
