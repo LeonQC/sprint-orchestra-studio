@@ -199,6 +199,33 @@
   line-height: 1.45;
 }
 
+.pe-capacity-decision {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.pe-capacity-decision p {
+  flex: 1 1 32rem;
+  margin: 0;
+}
+
+.pe-capacity-decision .bl-btn {
+  flex: none;
+}
+
+.pe-dependency-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pe-dependency-warning p {
+  flex: 1;
+  margin: 0;
+}
+
 .pe-summary {
   display: flex;
   gap: 1.25rem;
@@ -214,6 +241,64 @@
   font-size: 0.95rem;
 }
 
+.pe-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.pe-usage__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pe-usage__heading strong {
+  color: #334155;
+  font-size: 0.78rem;
+}
+
+.pe-usage__heading span {
+  font-size: 0.68rem;
+}
+
+.pe-usage__metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.pe-usage__metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.pe-usage__metrics span {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pe-usage__metrics strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.pe-auto-grow {
+  overflow-y: hidden;
+  resize: vertical;
+}
+
 .pe-refine {
   display: flex;
   flex-direction: column;
@@ -227,10 +312,16 @@
 .pe-refine__row {
   display: flex;
   gap: 0.5rem;
+  align-items: flex-end;
 }
 
 .pe-refine__row .bl-modal__input {
   flex: 1;
+}
+
+.pe-refine__input.bl-modal__input {
+  min-height: 2.35rem;
+  line-height: 1.4;
 }
 
 .pe-bucket {
@@ -241,6 +332,9 @@
   flex-direction: column;
   overflow: hidden;
   background: #f8fafc;
+  /* The modal body is a vertical flex scroller. Without this, multiple buckets shrink to the
+     viewport height and overflow:hidden clips their destination controls and every issue card. */
+  flex-shrink: 0;
 }
 
 .pe-bucket--over-capacity {
@@ -290,6 +384,11 @@
   border-radius: 999px;
   background: #fff;
   border: 1px solid #c7d2fe;
+  white-space: nowrap;
+}
+
+.pe-summary__warning {
+  color: #b45309;
 }
 
 .pe-bucket__points.is-over {
@@ -310,10 +409,37 @@
 .pe-bucket__target-controls {
   display: flex;
   gap: 0.5rem;
+  align-items: flex-start;
 }
 
-.pe-bucket__target-controls > * {
+.pe-bucket__target-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
   flex: 1;
+  min-width: 0;
+}
+
+.pe-bucket__target-field > span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.pe-sprint-name.bl-modal__input {
+  min-height: 2.35rem;
+  line-height: 1.4;
+}
+
+.pe-bucket__pending-target {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px dashed #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .pe-bucket__issues-header {
@@ -377,7 +503,7 @@
 }
 
 .pe-issue__desc.bl-modal__input {
-  min-height: 44px;
+  min-height: 72px;
   resize: vertical;
   font-size: 0.8rem;
   background: #fff;
@@ -446,9 +572,38 @@
 }
 
 .pe-issue__deps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.7rem;
+  border-left: 3px solid #818cf8;
+  border-radius: 0 8px 8px 0;
+  background: #eef2ff;
   font-size: 0.72rem;
-  color: #64748b;
+  color: #475569;
+}
+
+.pe-issue__dependency {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pe-issue__dependency p {
+  margin: 0;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.pe-issue__dependency p.is-missing {
+  color: #b45309;
   font-style: italic;
+}
+
+@media (max-width: 700px) {
+  .pe-usage__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .pe-add-issue {

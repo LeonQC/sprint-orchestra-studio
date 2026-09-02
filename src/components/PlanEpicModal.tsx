@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { TextareaHTMLAttributes } from 'react';
 import type { Sprint } from '../types/sprint';
 import { labelColor } from '../types/ticket';
 import { aiApi, labelApi } from '../api';
@@ -9,6 +10,16 @@ import type {
   RolloutSprintTargetDto,
   RolloutStatusDto,
 } from '../api';
+import {
+  hasCompleteBucketLayout,
+  isConcreteDependencyReason,
+  isValidStoryPoint,
+  needsExtraSprintAcceptance,
+  nextManualTempId,
+  normalizeSprintNameInput,
+  normalizedSprintName,
+  uniqueSprintName,
+} from './planEpicUtils';
 import './PlanEpicModal.css';
 
 type Stage = 'input' | 'preview' | 'committing' | 'error';
@@ -22,19 +33,79 @@ interface BucketChoice {
 interface SavedPlanEpicDraft {
   epicTitle: string;
   epicDescription: string;
+  epicGoals?: string[];
   issues: IssueDraftDto[];
   bucketAssignment: Record<string, number>;
   bucketOrder: number[];
   bucketChoices: Record<number, BucketChoice>;
+  acceptedExtraSprints?: boolean;
+  usage?: PlanUsage;
+}
+
+interface PlanUsage {
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+  latencySeconds: number;
+}
+
+const EMPTY_USAGE: PlanUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  estimatedCostUsd: 0,
+  latencySeconds: 0,
+};
+
+function AutoGrowTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const { onChange, className, ...rest } = props;
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const resize = (element: HTMLTextAreaElement) => {
+    element.style.height = 'auto';
+    element.style.height = `${element.scrollHeight}px`;
+  };
+  useLayoutEffect(() => {
+    if (ref.current) resize(ref.current);
+  }, [rest.value]);
+  return (
+    <textarea
+      {...rest}
+      ref={ref}
+      className={`${className ?? ''} pe-auto-grow`.trim()}
+      onChange={(event) => {
+        resize(event.currentTarget);
+        onChange?.(event);
+      }}
+    />
+  );
 }
 
 const draftStorageKey = (threadId: string) => `plan-epic-draft:${threadId}`;
 
 function clearSavedDraft(threadId: string) {
   try {
+    window.localStorage.removeItem(draftStorageKey(threadId));
+  } catch {
+    // Storage may be unavailable in a locked-down browser; server-side workflow recovery still works.
+  }
+  try {
+    // Clean up drafts written by versions that only survived a tab refresh.
     window.sessionStorage.removeItem(draftStorageKey(threadId));
   } catch {
     // Storage may be unavailable in a locked-down browser; server-side workflow recovery still works.
+  }
+}
+
+function readSavedDraft(threadId: string): string | null {
+  try {
+    const durableDraft = window.localStorage.getItem(draftStorageKey(threadId));
+    if (durableDraft) return durableDraft;
+  } catch {
+    // Fall through to the legacy per-tab copy.
+  }
+  try {
+    return window.sessionStorage.getItem(draftStorageKey(threadId));
+  } catch {
+    return null;
   }
 }
 
@@ -69,10 +140,14 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
 
   const [epicTitle, setEpicTitle] = useState('');
   const [epicDescription, setEpicDescription] = useState('');
+  const [epicGoals, setEpicGoals] = useState<string[]>([]);
   const [issues, setIssues] = useState<IssueDraftDto[]>([]);
   const [bucketAssignment, setBucketAssignment] = useState<Record<string, number>>({});
   const [bucketOrder, setBucketOrder] = useState<number[]>([]);
   const [bucketChoices, setBucketChoices] = useState<Record<number, BucketChoice>>({});
+  const [layoutRepairNotice, setLayoutRepairNotice] = useState<string | null>(null);
+  const [acceptedExtraSprints, setAcceptedExtraSprints] = useState(false);
+  const [usage, setUsage] = useState<PlanUsage>(EMPTY_USAGE);
   const manualIdCounter = useRef(0);
 
   const [refineInstruction, setRefineInstruction] = useState('');
@@ -81,6 +156,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
 
   const [commitError, setCommitError] = useState<string | null>(null);
   const [commitProgress, setCommitProgress] = useState<{ created: number; total: number } | null>(null);
+  const [backLoading, setBackLoading] = useState(false);
   /** Which issue's label picker is expanded — only one at a time, and only shows labels not already
    *  on that issue, so the preview doesn't dump the space's whole label list under every issue. */
   const [labelPickerFor, setLabelPickerFor] = useState<string | null>(null);
@@ -94,6 +170,14 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     () => issues.reduce((sum, i) => sum + (i.estimateStoryPoints ?? 0), 0),
     [issues],
   );
+  const unestimatedIssueCount = useMemo(
+    () => issues.filter((issue) => issue.estimateStoryPoints == null).length,
+    [issues],
+  );
+  const unassignedIssueCount = useMemo(() => {
+    const validBuckets = new Set(bucketOrder);
+    return issues.filter((issue) => !validBuckets.has(bucketAssignment[issue.tempId])).length;
+  }, [bucketOrder, issues, bucketAssignment]);
   const bucketPointsByIndex = useMemo(() => Object.fromEntries(
     bucketOrder.map((sprintIndex) => [
       sprintIndex,
@@ -108,6 +192,45 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
       : bucketOrder.filter((index) => (bucketPointsByIndex[index] ?? 0) > lastCapacity).length,
     [bucketOrder, bucketPointsByIndex, lastCapacity],
   );
+  const capacityConflict = lastCapacity != null
+    && lastTargetSprintCount != null
+    && totalPoints > lastCapacity * lastTargetSprintCount;
+  const additionalBucketCount = lastTargetSprintCount == null
+    ? 0
+    : Math.max(0, activeBucketCount - lastTargetSprintCount);
+  const requiresExtraSprintAcceptance = needsExtraSprintAcceptance(
+    activeBucketCount, lastTargetSprintCount, acceptedExtraSprints,
+  );
+  const sprintNameError = useMemo(() => {
+    const reserved = new Set(sprints.map((sprint) => normalizedSprintName(sprint.name)));
+    for (const sprintIndex of bucketOrder) {
+      if (!issues.some((issue) => bucketAssignment[issue.tempId] === sprintIndex)) continue;
+      const choice = bucketChoices[sprintIndex];
+      if (choice?.mode === 'existing') continue;
+      const name = choice?.newName.trim() ?? '';
+      if (!name) return `Plan bucket ${sprintIndex + 1} needs a new sprint name.`;
+      if (name.length > 100) {
+        return `Sprint name “${name}” is ${name.length} characters. Keep it at 100 or fewer.`;
+      }
+      const normalized = normalizedSprintName(name);
+      if (reserved.has(normalized)) {
+        return `Sprint name “${name}” already exists or is used by another plan bucket.`;
+      }
+      reserved.add(normalized);
+    }
+    return null;
+  }, [sprints, bucketOrder, issues, bucketAssignment, bucketChoices]);
+  const staleSprintTargetError = useMemo(() => {
+    const validFutureIds = new Set(futureSprints.map((sprint) => Number(sprint.id)));
+    for (const sprintIndex of bucketOrder) {
+      if (!issues.some((issue) => bucketAssignment[issue.tempId] === sprintIndex)) continue;
+      const choice = bucketChoices[sprintIndex];
+      if (choice?.mode === 'existing' && (!choice.sprintId || !validFutureIds.has(choice.sprintId))) {
+        return `The saved destination for plan bucket ${sprintIndex + 1} is no longer an available future sprint. Choose another destination.`;
+      }
+    }
+    return null;
+  }, [futureSprints, bucketOrder, issues, bucketAssignment, bucketChoices]);
   const autoCapacity = useMemo(() => {
     const completed = sprints
       .filter((s) => s.status === 'completed' && s.completedPoints != null && s.completedPoints > 0)
@@ -117,6 +240,88 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     return Math.round(completed.reduce((a, b) => a + b, 0) / completed.length);
   }, [sprints]);
   const hasEmptyTitle = useMemo(() => issues.some((i) => !i.title.trim()), [issues]);
+  const hasLongTitle = useMemo(() => issues.some((i) => i.title.trim().length > 120), [issues]);
+  const hasEmptyDescription = useMemo(
+    () => issues.some((issue) => !issue.description.trim()),
+    [issues],
+  );
+  const invalidNumericEstimateCount = useMemo(
+    () => issues.filter(
+      (issue) => issue.estimateStoryPoints != null && !isValidStoryPoint(issue.estimateStoryPoints),
+    ).length,
+    [issues],
+  );
+  const duplicateTempIdCount = useMemo(() => {
+    const seen = new Set<string>();
+    let duplicates = 0;
+    issues.forEach((issue) => {
+      if (!issue.tempId.trim() || seen.has(issue.tempId)) duplicates += 1;
+      seen.add(issue.tempId);
+    });
+    return duplicates;
+  }, [issues]);
+  const missingDependencyTargetCount = useMemo(() => {
+    const known = new Set(issues.map((issue) => issue.tempId));
+    return issues.reduce(
+      (count, issue) => count + issue.dependsOn.filter((dependency) => !known.has(dependency)).length,
+      0,
+    );
+  }, [issues]);
+  const dependencyReasonGapCount = useMemo(() => issues.reduce(
+    (count, issue) => count + issue.dependsOn.filter(
+      (dependency) => !isConcreteDependencyReason(issue.dependencyReasons?.[dependency]),
+    ).length,
+    0,
+  ), [issues]);
+
+  useEffect(() => {
+    if (stage !== 'preview' || issues.length === 0 || unassignedIssueCount === 0) return;
+
+    // A browser session may contain a draft from before a refine/restart whose tempIds no longer
+    // match its issue-to-sprint map. Never make those issues disappear: preserve every valid
+    // placement and deterministically recover only the orphaned ones into the least-loaded bucket.
+    const recoveredOrder = bucketOrder.length > 0 ? bucketOrder : [0];
+    const validBuckets = new Set(recoveredOrder);
+    const nextAssignment: Record<string, number> = {};
+    const load = new Map(recoveredOrder.map((index) => [index, { points: 0, count: 0 }]));
+    issues.forEach((issue) => {
+      const assigned = bucketAssignment[issue.tempId];
+      if (!validBuckets.has(assigned)) return;
+      nextAssignment[issue.tempId] = assigned;
+      const bucketLoad = load.get(assigned)!;
+      bucketLoad.points += issue.estimateStoryPoints ?? 0;
+      bucketLoad.count += 1;
+    });
+    issues.forEach((issue) => {
+      if (nextAssignment[issue.tempId] != null) return;
+      const destination = recoveredOrder.reduce((best, candidate) => {
+        const bestLoad = load.get(best)!;
+        const candidateLoad = load.get(candidate)!;
+        if (candidateLoad.points !== bestLoad.points) {
+          return candidateLoad.points < bestLoad.points ? candidate : best;
+        }
+        return candidateLoad.count < bestLoad.count ? candidate : best;
+      }, recoveredOrder[0]);
+      nextAssignment[issue.tempId] = destination;
+      const bucketLoad = load.get(destination)!;
+      bucketLoad.points += issue.estimateStoryPoints ?? 0;
+      bucketLoad.count += 1;
+    });
+    setBucketOrder(recoveredOrder);
+    setBucketAssignment(nextAssignment);
+    setBucketChoices((previous) => Object.fromEntries(recoveredOrder.map((index) => [
+      index,
+      previous[index] ?? {
+        mode: 'new',
+        newName: `${epicTitle || 'New epic'} — Sprint ${index + 1}`,
+      },
+    ])));
+    setLayoutRepairNotice(
+      `Recovered ${unassignedIssueCount} issue placement${unassignedIssueCount !== 1 ? 's' : ''} from an inconsistent browser draft. Review the sprint assignments before approval.`,
+    );
+  }, [
+    stage, issues, bucketOrder, bucketAssignment, unassignedIssueCount, epicTitle,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -139,45 +344,89 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
   function applyPlanResponse(
     response: PlanEpicResponse,
     restoredTargets: RolloutSprintTargetDto[] = [],
+    usageMode: 'replace' | 'add' = 'replace',
+    preservedChoices: Record<number, BucketChoice> = {},
   ) {
+    setLayoutRepairNotice(null);
+    setAcceptedExtraSprints(false);
     setEpicTitle(response.epic.title);
     setEpicDescription(response.epic.description);
+    setEpicGoals(response.epic.goals ?? []);
     setIssues(response.issues);
     const assignment: Record<string, number> = {};
     const order: number[] = [];
     const choices: Record<number, BucketChoice> = {};
+    const reservedSprintNames = new Set(sprints.map((sprint) => normalizedSprintName(sprint.name)));
     const targetByIndex = new Map(restoredTargets.map((target) => [target.sprintIndex, target]));
     response.sprintPlan.forEach((bucket) => {
       order.push(bucket.sprintIndex);
       bucket.issueTempIds.forEach((tempId) => { assignment[tempId] = bucket.sprintIndex; });
       const restored = targetByIndex.get(bucket.sprintIndex);
-      choices[bucket.sprintIndex] = restored?.mode === 'existing' && restored.sprintId
-        ? { mode: 'existing', sprintId: restored.sprintId, newName: '' }
-        : {
+      const preserved = preservedChoices[bucket.sprintIndex];
+      if (restored?.mode === 'existing' && restored.sprintId) {
+        choices[bucket.sprintIndex] = { mode: 'existing', sprintId: restored.sprintId, newName: '' };
+      } else if (preserved?.mode === 'existing' && preserved.sprintId) {
+        choices[bucket.sprintIndex] = { ...preserved };
+      } else if (preserved?.mode === 'new' && preserved.newName.trim()) {
+        choices[bucket.sprintIndex] = { ...preserved };
+        reservedSprintNames.add(normalizedSprintName(preserved.newName));
+      } else {
+        const baseName = restored?.sprintName
+          || `${response.epic.title} — Sprint ${bucket.sprintIndex + 1}`;
+        choices[bucket.sprintIndex] = {
           mode: 'new',
-          newName: restored?.sprintName || `${response.epic.title} — Sprint ${bucket.sprintIndex + 1}`,
+          newName: restored?.sprintName
+            ? baseName
+            : uniqueSprintName(baseName, reservedSprintNames),
         };
+        if (restored?.sprintName) reservedSprintNames.add(normalizedSprintName(baseName));
+      }
     });
     setBucketAssignment(assignment);
     setBucketOrder(order);
     setBucketChoices(choices);
     setDegraded(response.degraded);
+    const responseUsage: PlanUsage = {
+      inputTokens: response.inputTokens ?? 0,
+      outputTokens: response.outputTokens ?? 0,
+      estimatedCostUsd: response.estimatedCostUsd ?? 0,
+      latencySeconds: response.latencySeconds ?? 0,
+    };
+    setUsage((current) => usageMode === 'add' ? {
+      inputTokens: current.inputTokens + responseUsage.inputTokens,
+      outputTokens: current.outputTokens + responseUsage.outputTokens,
+      estimatedCostUsd: current.estimatedCostUsd + responseUsage.estimatedCostUsd,
+      latencySeconds: current.latencySeconds + responseUsage.latencySeconds,
+    } : responseUsage);
   }
 
   function restoreSavedDraft(threadId: string): boolean {
     try {
-      const raw = window.sessionStorage.getItem(draftStorageKey(threadId));
+      const raw = readSavedDraft(threadId);
       if (!raw) return false;
       const saved = JSON.parse(raw) as SavedPlanEpicDraft;
-      if (typeof saved.epicTitle !== 'string' || !Array.isArray(saved.issues) || !Array.isArray(saved.bucketOrder)) {
+      if (
+        typeof saved.epicTitle !== 'string'
+        || !Array.isArray(saved.issues)
+        || !Array.isArray(saved.bucketOrder)
+        || typeof saved.bucketAssignment !== 'object'
+        || saved.bucketAssignment == null
+        || !hasCompleteBucketLayout(
+          saved.issues.map((issue) => issue.tempId), saved.bucketOrder, saved.bucketAssignment,
+        )
+      ) {
+        clearSavedDraft(threadId);
         return false;
       }
       setEpicTitle(saved.epicTitle);
       setEpicDescription(saved.epicDescription ?? '');
+      setEpicGoals(saved.epicGoals ?? []);
       setIssues(saved.issues);
       setBucketAssignment(saved.bucketAssignment ?? {});
       setBucketOrder(saved.bucketOrder);
       setBucketChoices(saved.bucketChoices ?? {});
+      setAcceptedExtraSprints(saved.acceptedExtraSprints ?? false);
+      setUsage(saved.usage ?? EMPTY_USAGE);
       return true;
     } catch {
       return false;
@@ -189,19 +438,26 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     const saved: SavedPlanEpicDraft = {
       epicTitle,
       epicDescription,
+      epicGoals,
       issues,
       bucketAssignment,
       bucketOrder,
       bucketChoices,
+      acceptedExtraSprints,
+      usage,
     };
     try {
-      window.sessionStorage.setItem(draftStorageKey(workflowThreadId), JSON.stringify(saved));
+      window.localStorage.setItem(draftStorageKey(workflowThreadId), JSON.stringify(saved));
     } catch {
-      // The durable server checkpoint remains recoverable even if browser storage is unavailable.
+      try {
+        window.sessionStorage.setItem(draftStorageKey(workflowThreadId), JSON.stringify(saved));
+      } catch {
+        // The durable server checkpoint remains recoverable even if browser storage is unavailable.
+      }
     }
   }, [
-    workflowThreadId, stage, epicTitle, epicDescription, issues,
-    bucketAssignment, bucketOrder, bucketChoices,
+    workflowThreadId, stage, epicTitle, epicDescription, epicGoals, issues,
+    bucketAssignment, bucketOrder, bucketChoices, acceptedExtraSprints, usage,
   ]);
 
   useEffect(() => {
@@ -216,9 +472,12 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
             epic: existing.plan.epic,
             issues: existing.plan.issues,
             sprintPlan: existing.plan.sprintPlan,
-            degraded: existing.degraded,
-            latencySeconds: 0,
-          }, existing.plan.sprintTargets);
+          degraded: existing.degraded,
+          latencySeconds: existing.planningLatencySeconds,
+          inputTokens: existing.inputTokens,
+          outputTokens: existing.outputTokens,
+          estimatedCostUsd: existing.estimatedCostUsd,
+        }, existing.plan.sprintTargets);
         } else {
           setDegraded(existing.degraded);
         }
@@ -245,6 +504,9 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
       }
     })();
     return () => { cancelled = true; };
+  // Discovery intentionally reruns only when the selected space changes. Including the local
+  // restore helpers would recreate this effect on every preview edit and overwrite that edit.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spaceId]);
 
   async function handleGenerate() {
@@ -257,6 +519,14 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
       const targetCount = targetSprintCountInput.trim() ? Number(targetSprintCountInput) : NaN;
       const resolvedCapacity = Number.isFinite(capacity) ? capacity : null;
       const resolvedTargetCount = Number.isFinite(targetCount) ? targetCount : null;
+      if (resolvedCapacity == null || !Number.isInteger(resolvedCapacity) || resolvedCapacity <= 0) {
+        setGenError('Sprint capacity must be a whole number greater than 0.');
+        return;
+      }
+      if (resolvedTargetCount != null && (!Number.isInteger(resolvedTargetCount) || resolvedTargetCount <= 0)) {
+        setGenError('Desired sprint count must be a whole number greater than 0.');
+        return;
+      }
       const workflow = await aiApi.startRolloutStream(
         proposal.trim(),
         spaceId,
@@ -273,7 +543,10 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
         issues: workflow.plan.issues,
         sprintPlan: workflow.plan.sprintPlan,
         degraded: workflow.degraded,
-        latencySeconds: 0,
+        latencySeconds: workflow.planningLatencySeconds,
+        inputTokens: workflow.inputTokens,
+        outputTokens: workflow.outputTokens,
+        estimatedCostUsd: workflow.estimatedCostUsd,
       });
       setWorkflowThreadId(workflow.threadId);
       setResumedExisting(false);
@@ -288,21 +561,21 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     }
   }
 
-  async function handleRefine() {
-    if (!refineInstruction.trim() || refineLoading) return;
+  async function runRefinement(instruction: string, clearManualInput = false) {
+    if (!instruction.trim() || refineLoading) return;
     setRefineLoading(true);
     setRefineError(null);
     try {
       const response = await aiApi.refinePlan(
-        { title: epicTitle, description: epicDescription, goals: [] },
+        { title: epicTitle, description: epicDescription, goals: epicGoals },
         issues,
-        refineInstruction.trim(),
+        instruction.trim(),
         spaceLabels.map((l) => l.name),
         lastCapacity,
         lastTargetSprintCount,
       );
-      applyPlanResponse(response);
-      setRefineInstruction('');
+      applyPlanResponse(response, [], 'add', bucketChoices);
+      if (clearManualInput) setRefineInstruction('');
     } catch (err) {
       setRefineError(err instanceof Error ? err.message : 'Refine failed — try again.');
     } finally {
@@ -310,8 +583,30 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     }
   }
 
+  async function handleRefine() {
+    await runRefinement(refineInstruction, true);
+  }
+
+  async function handleExplainDependencies() {
+    await runRefinement(
+      'Preserve the epic, issues, estimates, labels, sprint scope, and every existing dependsOn edge exactly. '
+      + 'For each dependency, add or replace dependencyReasons with a concrete explanation in natural workplace language. '
+      + 'Say what specific decision, information, or finished piece of work is needed first, how the later work uses it, '
+      + 'and what would go wrong or need rework if both started independently. Write for product, design, QA, operations, '
+      + 'and engineering; use technical terms only when truly necessary and explain their practical meaning. '
+      + 'Do not say only that one issue must finish before another can start, and do not merely repeat issue titles.',
+    );
+  }
+
   function updateIssue(tempId: string, patch: Partial<IssueDraftDto>) {
-    setIssues((prev) => prev.map((i) => (i.tempId === tempId ? { ...i, ...patch } : i)));
+    const prerequisiteMeaningChanged = patch.title !== undefined || patch.description !== undefined;
+    setIssues((prev) => prev.map((issue) => {
+      if (issue.tempId === tempId) return { ...issue, ...patch };
+      if (!prerequisiteMeaningChanged || !issue.dependsOn.includes(tempId)) return issue;
+      const dependencyReasons = { ...(issue.dependencyReasons ?? {}) };
+      delete dependencyReasons[tempId];
+      return { ...issue, dependencyReasons };
+    }));
   }
 
   function updatePoints(tempId: string, value: string) {
@@ -330,7 +625,15 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
   function removeIssue(tempId: string) {
     setIssues((prev) => prev
       .filter((i) => i.tempId !== tempId)
-      .map((i) => ({ ...i, dependsOn: i.dependsOn.filter((d) => d !== tempId) })));
+      .map((i) => {
+        const dependencyReasons = { ...(i.dependencyReasons ?? {}) };
+        delete dependencyReasons[tempId];
+        return {
+          ...i,
+          dependsOn: i.dependsOn.filter((d) => d !== tempId),
+          dependencyReasons,
+        };
+      }));
     setBucketAssignment((prev) => {
       const next = { ...prev };
       delete next[tempId];
@@ -340,8 +643,11 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
   }
 
   function addIssue(sprintIndex: number) {
-    manualIdCounter.current += 1;
-    const tempId = `manual-${manualIdCounter.current}`;
+    const nextId = nextManualTempId(
+      issues.map((issue) => issue.tempId), manualIdCounter.current,
+    );
+    manualIdCounter.current = nextId.counter;
+    const { tempId } = nextId;
     const newIssue: IssueDraftDto = {
       tempId,
       title: '',
@@ -351,6 +657,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
       estimateStoryPoints: null,
       estimateRationale: null,
       dependsOn: [],
+      dependencyReasons: {},
     };
     setIssues((prev) => [...prev, newIssue]);
     setBucketAssignment((prev) => ({ ...prev, [tempId]: sprintIndex }));
@@ -404,7 +711,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
 
   function finalEditedPlan() {
     return {
-      epic: { title: epicTitle.trim(), description: epicDescription.trim(), goals: [] },
+      epic: { title: epicTitle.trim(), description: epicDescription.trim(), goals: epicGoals },
       issues,
       sprintTargets: finalSprintTargets(),
     };
@@ -463,25 +770,37 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
 
   async function handleBack() {
     const threadId = workflowThreadId;
-    if (threadId) clearSavedDraft(threadId);
-    setWorkflowThreadId(null);
-    setResumedExisting(false);
-    setStage('input');
-    if (threadId) {
-      try {
+    setBackLoading(true);
+    setCommitError(null);
+    try {
+      if (threadId) {
         await aiApi.submitRolloutDecision(threadId, 'reject');
-      } catch {
-        // Returning to the input is still safe: no Jira writes happen before approval.
       }
+      if (threadId) clearSavedDraft(threadId);
+      setWorkflowThreadId(null);
+      setResumedExisting(false);
+      setStage('input');
+    } catch {
+      setCommitError(
+        'Could not discard this saved workflow. Nothing was published; try Back again so the old plan does not unexpectedly return later.',
+      );
+    } finally {
+      setBackLoading(false);
     }
   }
 
   return (
     <div className="bl-overlay" onMouseDown={onClose}>
-      <div className="bl-modal pe-modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="bl-modal pe-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pe-modal-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="bl-modal__header">
-          <h2 className="bl-modal__title">✨ Plan Epic with AI</h2>
-          <button type="button" className="bl-modal__close" onClick={onClose}>✕</button>
+          <h2 id="pe-modal-title" className="bl-modal__title">✨ Plan Epic with AI</h2>
+          <button type="button" className="bl-modal__close" aria-label="Close Plan Epic" onClick={onClose}>✕</button>
         </div>
         <div className="bl-modal__body pe-body">
           {checkingForExisting && (
@@ -490,7 +809,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
           {!checkingForExisting && stage === 'input' && (
             <>
               <label className="bl-modal__label" htmlFor="pe-proposal">Proposal</label>
-              <textarea
+              <AutoGrowTextarea
                 id="pe-proposal"
                 className="bl-modal__input pe-textarea"
                 placeholder="e.g. Add dark mode support across the app, including a settings toggle and persisted preference..."
@@ -506,6 +825,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                     className="bl-modal__input"
                     type="number"
                     min="1"
+                    step="1"
                     placeholder={String(autoCapacity)}
                     value={capacityInput}
                     onChange={(e) => setCapacityInput(e.target.value)}
@@ -521,6 +841,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                     className="bl-modal__input"
                     type="number"
                     min="1"
+                    step="1"
                     placeholder="Auto"
                     value={targetSprintCountInput}
                     onChange={(e) => setTargetSprintCountInput(e.target.value)}
@@ -556,13 +877,14 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                   id="pe-epic-title"
                   className="bl-modal__input"
                   value={epicTitle}
+                  maxLength={120}
                   disabled={stage !== 'preview'}
                   onChange={(e) => setEpicTitle(e.target.value)}
                 />
               </div>
               <div className="pe-field">
                 <label className="bl-modal__label" htmlFor="pe-epic-desc">Epic description</label>
-                <textarea
+                <AutoGrowTextarea
                   id="pe-epic-desc"
                   className="bl-modal__input pe-textarea"
                   value={epicDescription}
@@ -573,16 +895,128 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
 
               <div className="pe-summary">
                 <span><strong>{issues.length}</strong> issue{issues.length !== 1 ? 's' : ''}</span>
-                <span><strong>{totalPoints}</strong> point{totalPoints !== 1 ? 's' : ''}</span>
-                <span><strong>{activeBucketCount}</strong> sprint{activeBucketCount !== 1 ? 's' : ''}</span>
+                <span><strong>{totalPoints}</strong> estimated point{totalPoints !== 1 ? 's' : ''}</span>
+                {unestimatedIssueCount > 0 && (
+                  <span className="pe-summary__warning">
+                    <strong>{unestimatedIssueCount}</strong> unestimated
+                  </span>
+                )}
+                {additionalBucketCount > 0 && lastTargetSprintCount != null ? (
+                  <span>
+                    <strong>{lastTargetSprintCount}</strong> requested +{' '}
+                    <strong>{additionalBucketCount}</strong> additional proposed
+                  </span>
+                ) : (
+                  <span>
+                    <strong>{activeBucketCount}</strong> proposed sprint bucket
+                    {activeBucketCount !== 1 ? 's' : ''}
+                  </span>
+                )}
               </div>
-              {lastCapacity != null && lastTargetSprintCount != null
-                && totalPoints > lastCapacity * lastTargetSprintCount && (
+              {(usage.inputTokens > 0 || usage.outputTokens > 0 || usage.latencySeconds > 0) && (
+                <div className="pe-usage" aria-label="AI planning details">
+                  <div className="pe-usage__heading">
+                    <strong>AI planning details</strong>
+                    <span>Generation and adjustments in this planning session</span>
+                  </div>
+                  <div className="pe-usage__metrics">
+                    <div><span>Total tokens</span><strong>{(usage.inputTokens + usage.outputTokens).toLocaleString()}</strong></div>
+                    <div><span>Prompt</span><strong>{usage.inputTokens.toLocaleString()}</strong></div>
+                    <div><span>Response</span><strong>{usage.outputTokens.toLocaleString()}</strong></div>
+                    <div>
+                      <span>Estimated cost</span>
+                      <strong>
+                        {usage.estimatedCostUsd > 0 && usage.estimatedCostUsd < 0.000001
+                          ? '<$0.000001'
+                          : `$${usage.estimatedCostUsd.toFixed(6)}`}
+                      </strong>
+                    </div>
+                    <div><span>AI time</span><strong>{usage.latencySeconds.toFixed(2)}s</strong></div>
+                  </div>
+                </div>
+              )}
+              {dependencyReasonGapCount > 0 && (
+                <div className="pe-capacity-warning pe-dependency-warning">
+                  <p>
+                    <strong>{dependencyReasonGapCount} dependency explanation
+                      {dependencyReasonGapCount !== 1 ? 's are' : ' is'} missing or circular.</strong>{' '}
+                    Approval is blocked until each one explains what must be ready first and what
+                    would go wrong or need rework if the team started too soon.
+                  </p>
+                  <button
+                    type="button"
+                    className="bl-btn bl-btn--outline"
+                    onClick={handleExplainDependencies}
+                    disabled={refineLoading}
+                  >
+                    {refineLoading ? 'Writing reasons…' : 'Add clear reasons with AI'}
+                  </button>
+                </div>
+              )}
+              {layoutRepairNotice && (
+                <p className="pe-capacity-warning"><strong>Layout recovered:</strong> {layoutRepairNotice}</p>
+              )}
+              {(!epicDescription.trim() || hasEmptyDescription) && (
                 <p className="pe-capacity-warning">
-                  <strong>Capacity conflict:</strong> {totalPoints} points cannot fit into{' '}
-                  {lastTargetSprintCount} sprint{lastTargetSprintCount !== 1 ? 's' : ''} ×{' '}
-                  {lastCapacity} points ({lastCapacity * lastTargetSprintCount} total). Capacity takes
-                  priority, so the plan needs more sprints unless you split or re-estimate the work.
+                  <strong>Description required.</strong>{' '}
+                  {!epicDescription.trim()
+                    ? 'Explain the epic outcome before approval.'
+                    : 'Every issue needs a short description of what will be done and why.'}
+                </p>
+              )}
+              {(duplicateTempIdCount > 0 || missingDependencyTargetCount > 0) && (
+                <p className="pe-capacity-warning">
+                  <strong>The plan structure is inconsistent.</strong>{' '}
+                  Use Adjust plan to regenerate it before approval; no Jira data has been created.
+                </p>
+              )}
+              {unestimatedIssueCount > 0 && (
+                <p className="pe-capacity-warning">
+                  <strong>{unestimatedIssueCount} issue{unestimatedIssueCount !== 1 ? 's have' : ' has'} no estimate.</strong>{' '}
+                  Capacity totals only include estimated work. Add story points below before approval
+                  so the sprint split is meaningful.
+                </p>
+              )}
+              {invalidNumericEstimateCount > 0 && (
+                <p className="pe-capacity-warning">
+                  <strong>{invalidNumericEstimateCount} estimate{invalidNumericEstimateCount !== 1 ? 's are' : ' is'} outside the planning scale.</strong>{' '}
+                  Use 1, 2, 3, 5, 8, or 13 points before approval.
+                </p>
+              )}
+              {additionalBucketCount > 0 && lastTargetSprintCount != null && lastCapacity != null && (
+                <div className="pe-capacity-warning pe-capacity-decision">
+                  <p>
+                    <strong>Decision required:</strong> you requested {lastTargetSprintCount}{' '}
+                    sprint{lastTargetSprintCount !== 1 ? 's' : ''} × {lastCapacity} points, but this
+                    plan needs {activeBucketCount} buckets
+                    {capacityConflict
+                      ? ` because ${totalPoints} points exceed the requested ${lastCapacity * lastTargetSprintCount}-point total`
+                      : ' because the issue sizes and required order do not fit safely into the requested buckets'}.
+                    {' '}No sprint has been created yet.
+                  </p>
+                  {activeBucketCount > lastTargetSprintCount && (
+                    <button
+                      type="button"
+                      className="bl-btn bl-btn--outline"
+                      onClick={() => setAcceptedExtraSprints(true)}
+                      disabled={acceptedExtraSprints}
+                    >
+                      {acceptedExtraSprints
+                        ? `Accepted ${activeBucketCount} sprint buckets`
+                        : `Use ${activeBucketCount} sprint buckets`}
+                    </button>
+                  )}
+                  {!acceptedExtraSprints && (
+                    <span>Or revise/remove work until it fits the requested capacity.</span>
+                  )}
+                </div>
+              )}
+              {sprintNameError && (
+                <p className="pe-capacity-warning"><strong>Sprint name required:</strong> {sprintNameError}</p>
+              )}
+              {staleSprintTargetError && (
+                <p className="pe-capacity-warning">
+                  <strong>Sprint destination changed:</strong> {staleSprintTargetError}
                 </p>
               )}
               {lastCapacity != null && overCapacityBucketCount > 0 && (
@@ -599,13 +1033,19 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                     Adjust the plan — like talking it through in sprint planning
                   </label>
                   <div className="pe-refine__row">
-                    <input
+                    <AutoGrowTextarea
                       id="pe-refine-instruction"
-                      className="bl-modal__input"
+                      className="bl-modal__input pe-refine__input"
                       placeholder="e.g. 'add a QA/testing task', 'combine the two backend setup issues', 'drop the inventory one for MVP'"
                       value={refineInstruction}
                       onChange={(e) => setRefineInstruction(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleRefine(); } }}
+                      rows={1}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault();
+                          handleRefine();
+                        }
+                      }}
                     />
                     <button
                       type="button"
@@ -624,54 +1064,104 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                 const rows = bucketIssues(sprintIndex);
                 if (rows.length === 0 && stage !== 'preview') return null;
                 const bucketPoints = bucketPointsByIndex[sprintIndex] ?? 0;
+                const bucketUnestimated = rows.filter((issue) => issue.estimateStoryPoints == null).length;
                 const overCapacity = lastCapacity != null && bucketPoints > lastCapacity;
+                const isAdditionalBucket = lastTargetSprintCount != null
+                  && activeBucketCount > lastTargetSprintCount
+                  && sprintIndex >= lastTargetSprintCount;
                 const choice = bucketChoices[sprintIndex] ?? { mode: 'new' as const, newName: '' };
                 return (
                   <section className={`pe-bucket${overCapacity ? ' pe-bucket--over-capacity' : ''}`} key={sprintIndex}>
                     <div className="pe-bucket__header">
                       <div className="pe-bucket__identity">
-                        <span className="pe-bucket__eyebrow">SPRINT PLAN</span>
-                        <span className="pe-bucket__title">Sprint {sprintIndex + 1}</span>
+                        <span className="pe-bucket__eyebrow">
+                          {isAdditionalBucket ? 'ADDITIONAL CAPACITY PROPOSAL' : 'REQUESTED SPRINT BUCKET'}
+                        </span>
+                        <span className="pe-bucket__title">
+                          {isAdditionalBucket && !acceptedExtraSprints
+                            ? 'Overflow work — decision needed'
+                            : `Plan bucket ${sprintIndex + 1}`}
+                        </span>
                       </div>
                       <span className={`pe-bucket__points${overCapacity ? ' is-over' : ''}`}>
                         {bucketPoints}{lastCapacity != null ? ` / ${lastCapacity}` : ''} pts
+                        {bucketUnestimated > 0 ? ` · ${bucketUnestimated} unestimated` : ''}
                       </span>
                     </div>
                     <div className="pe-bucket__target">
                       <span className="pe-bucket__section-label">SPRINT DESTINATION</span>
-                      <div className="pe-bucket__target-controls">
-                        <select
+                      {isAdditionalBucket && !acceptedExtraSprints ? (
+                        <p className="pe-bucket__pending-target">
+                          No sprint will be created for this work unless you accept the additional
+                          bucket above. The issues remain visible below so you can review them first.
+                        </p>
+                      ) : (
+                        <div className="pe-bucket__target-controls">
+                        <label className="pe-bucket__target-field">
+                          <span>Destination</span>
+                          <select
                           className="bl-modal__input"
                           value={choice.mode === 'existing' ? String(choice.sprintId ?? '') : 'new'}
                           disabled={stage !== 'preview'}
                           onChange={(e) => {
                             const value = e.target.value;
-                            setBucketChoices((prev) => ({
-                              ...prev,
-                              [sprintIndex]: value === 'new'
-                                ? { mode: 'new', newName: prev[sprintIndex]?.newName || `${epicTitle} — Sprint ${sprintIndex + 1}` }
-                                : { mode: 'existing', sprintId: Number(value), newName: '' },
-                            }));
+                            setBucketChoices((prev) => {
+                              if (value !== 'new') {
+                                return {
+                                  ...prev,
+                                  [sprintIndex]: { mode: 'existing', sprintId: Number(value), newName: '' },
+                                };
+                              }
+                              const reserved = new Set(sprints.map((sprint) => normalizedSprintName(sprint.name)));
+                              Object.entries(prev).forEach(([index, target]) => {
+                                if (Number(index) !== sprintIndex && target.mode === 'new' && target.newName.trim()) {
+                                  reserved.add(normalizedSprintName(target.newName));
+                                }
+                              });
+                              return {
+                                ...prev,
+                                [sprintIndex]: {
+                                  mode: 'new',
+                                  newName: uniqueSprintName(
+                                    `${epicTitle || 'New epic'} — Sprint ${sprintIndex + 1}`,
+                                    reserved,
+                                  ),
+                                },
+                              };
+                            });
                           }}
                         >
                           <option value="new">+ Create new sprint</option>
                           {futureSprints.map((s) => (
                             <option key={s.id} value={s.id}>{s.name}</option>
                           ))}
-                        </select>
+                          </select>
+                        </label>
                         {choice.mode === 'new' && (
-                          <input
-                            className="bl-modal__input"
+                          <label className="pe-bucket__target-field">
+                            <span>New sprint name</span>
+                            <AutoGrowTextarea
+                            className="bl-modal__input pe-sprint-name"
+                            rows={1}
                             value={choice.newName}
+                            maxLength={100}
                             disabled={stage !== 'preview'}
                             placeholder="New sprint name"
                             onChange={(e) => setBucketChoices((prev) => ({
                               ...prev,
-                              [sprintIndex]: { ...choice, newName: e.target.value },
+                              [sprintIndex]: {
+                                ...choice,
+                                newName: normalizeSprintNameInput(e.target.value),
+                              },
                             }))}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') event.preventDefault();
+                            }}
                           />
+                          </label>
                         )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                     <div className="pe-bucket__issues-header">
                       <span className="pe-bucket__section-label">ISSUES IN THIS SPRINT</span>
@@ -698,11 +1188,12 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                             <input
                               className="bl-modal__input pe-issue__title"
                               value={issue.title}
+                              maxLength={120}
                               placeholder="Issue title"
                               disabled={stage !== 'preview'}
                               onChange={(e) => updateIssue(issue.tempId, { title: e.target.value })}
                             />
-                            <textarea
+                            <AutoGrowTextarea
                               className="bl-modal__input pe-issue__desc"
                               value={issue.description}
                               placeholder="Description — what needs to be done and why"
@@ -725,6 +1216,8 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                                 className="bl-modal__input pe-issue__points"
                                 type="number"
                                 min="1"
+                                max="13"
+                                step="1"
                                 placeholder="pts"
                                 value={issue.estimateStoryPoints ?? ''}
                                 disabled={stage !== 'preview'}
@@ -779,9 +1272,24 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                               </div>
                             )}
                             {issue.dependsOn.length > 0 && (
-                              <span className="pe-issue__deps">
-                                blocked by: {issue.dependsOn.map((id) => issues.find((i) => i.tempId === id)?.title || id).join(', ')}
-                              </span>
+                              <div className="pe-issue__deps">
+                                <strong>Why this work must wait</strong>
+                                {issue.dependsOn.map((id) => {
+                                  const prerequisite = issues.find((candidate) => candidate.tempId === id);
+                                  const prerequisiteTitle = prerequisite?.title || id;
+                                  const reason = issue.dependencyReasons?.[id];
+                                  const concreteReason = isConcreteDependencyReason(reason) ? reason : '';
+                                  return (
+                                    <div className="pe-issue__dependency" key={id}>
+                                      <span>Blocked by <strong>{prerequisiteTitle}</strong></span>
+                                      <p className={concreteReason ? '' : 'is-missing'}>
+                                        {concreteReason
+                                          || 'No clear reason has been provided yet. Use “Add clear reasons with AI” above.'}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             )}
                           </div>
                         );
@@ -822,13 +1330,61 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
           )}
           {stage === 'preview' && (
             <>
-              <button type="button" className="bl-btn bl-btn--ghost" onClick={handleBack}>Back</button>
+              <button
+                type="button"
+                className="bl-btn bl-btn--ghost"
+                onClick={handleBack}
+                disabled={backLoading}
+              >
+                {backLoading ? 'Discarding…' : 'Back'}
+              </button>
               <button
                 type="button"
                 className="bl-btn bl-btn--primary"
                 onClick={handleCommit}
-                disabled={!epicTitle.trim() || issues.length === 0 || hasEmptyTitle}
-                title={hasEmptyTitle ? 'Every issue needs a title before creating' : undefined}
+                disabled={
+                  !epicTitle.trim()
+                  || epicTitle.trim().length > 120
+                  || !epicDescription.trim()
+                  || issues.length === 0
+                  || hasEmptyTitle
+                  || hasLongTitle
+                  || hasEmptyDescription
+                  || unassignedIssueCount > 0
+                  || unestimatedIssueCount > 0
+                  || invalidNumericEstimateCount > 0
+                  || overCapacityBucketCount > 0
+                  || duplicateTempIdCount > 0
+                  || missingDependencyTargetCount > 0
+                  || dependencyReasonGapCount > 0
+                  || requiresExtraSprintAcceptance
+                  || sprintNameError != null
+                  || staleSprintTargetError != null
+                  || backLoading
+                }
+                title={
+                  !epicDescription.trim()
+                    ? 'Describe the epic outcome before creating'
+                    : hasEmptyTitle
+                    ? 'Every issue needs a title before creating'
+                    : hasEmptyDescription
+                      ? 'Every issue needs a description before creating'
+                      : invalidNumericEstimateCount > 0
+                        ? 'Use only 1, 2, 3, 5, 8, or 13 story points'
+                        : overCapacityBucketCount > 0
+                          ? 'Split or re-estimate work that exceeds a sprint capacity'
+                          : duplicateTempIdCount > 0 || missingDependencyTargetCount > 0
+                            ? 'Regenerate the inconsistent plan structure before creating'
+                            : unassignedIssueCount > 0
+                              ? 'Every issue must be assigned to a sprint before creating'
+                              : unestimatedIssueCount > 0
+                                ? 'Estimate every issue before creating so sprint capacity is reliable'
+                                : requiresExtraSprintAcceptance
+                                  ? 'Accept the additional sprint buckets or revise the plan first'
+                                  : dependencyReasonGapCount > 0
+                                    ? 'Explain every dependency concretely before creating'
+                                    : staleSprintTargetError ?? sprintNameError ?? undefined
+                }
               >
                 Approve &amp; create epic + {issues.length} issue{issues.length !== 1 ? 's' : ''}
               </button>
