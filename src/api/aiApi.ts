@@ -52,6 +52,9 @@ export interface TaskDraftDto {
   issueType: IssueType;
   labels: string[];
   estimateStoryPoints: number | null;
+  /** One sentence explaining what drives that size. Non-null only alongside an estimate — the
+   *  server enforces the pairing (ai-service/app/drafting/schemas.py). */
+  estimateRationale: string | null;
   dependencies: string[];
 }
 
@@ -76,6 +79,7 @@ export interface IssueDraftDto {
   estimateStoryPoints: number | null;
   estimateRationale: string | null;
   dependsOn: string[];
+  dependencyReasons?: Record<string, string>;
 }
 
 export interface SprintBucketDto {
@@ -90,6 +94,13 @@ export interface PlanEpicResponse {
   sprintPlan: SprintBucketDto[];
   degraded: boolean;
   latencySeconds: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
+  estimatedCostUsd: number;
 }
 
 export interface CitationDto {
@@ -117,6 +128,21 @@ export interface StageTimingsDto {
   totalMs: number;
 }
 
+export interface ModelUsageDto {
+  role: 'router' | 'answer_agent';
+  provider: string;
+  model: string;
+  deployment: 'local' | 'hosted';
+  inputTokens: number;
+  outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
+  estimatedCostUsd: number;
+  pricingStatus: 'free_local' | 'estimated' | 'unavailable';
+}
+
 export interface AskResponseDto {
   answer: string;
   abstained: boolean;
@@ -125,7 +151,15 @@ export interface AskResponseDto {
   citations: CitationDto[];
   inputTokens: number;
   outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
   estimatedCostUsd: number;
+  /** Per-role attribution. Optional so a rolling frontend deploy still accepts an older backend. */
+  modelUsage?: ModelUsageDto[];
+  routeSource?: 'keyword' | 'model' | 'fallback';
+  routeTool?: string;
   cacheHit: boolean;
   stageTimings?: StageTimingsDto;
 }
@@ -133,11 +167,17 @@ export interface AskResponseDto {
 export interface SemanticSearchHitDto {
   issueId: number;
   issueKey: string;
-  /** Real cosine similarity (0-1) — backend uses vector-only retrieval for this endpoint
-   *  specifically so this number means something (unlike RRF's rank-fusion score elsewhere in this
-   *  app), and only returns results that clear a minimum-relevance floor server-side (see
-   *  ai-service/app/search/service.py) — so anything returned here is worth showing as a % match. */
+  /** Raw retrieval score, on whichever scale the backend produced it: cosine similarity (0-1)
+   *  normally, but an UNBOUNDED cross-encoder logit when vectorization-service reranked (which it
+   *  does by default). Only the server knows which, so never display or scale this — the earlier
+   *  comment here claimed it was always cosine, and rendering `score * 100 + '%'` on that assumption
+   *  is what produced the "640% match" chip in the duplicate check. Use `confidence` instead. */
   score: number;
+  /** The same signal converted server-side into a real 0-1 confidence whichever scale it came from
+   *  (see relevance_confidence() in ai-service/app/search/service.py). This is the one that is safe
+   *  to render as a percentage. Anything the backend returns has already cleared its relevance
+   *  floor, which sits at 0.5 on this scale. */
+  confidence: number;
   snippet: string;
 }
 
@@ -151,7 +191,7 @@ export interface FlaggedIssueDto {
   detail?: string;
 }
 
-export type SprintRiskLevel = 'on_track' | 'at_risk' | 'behind';
+export type SprintRiskLevel = 'on_track' | 'at_risk' | 'behind' | 'incomplete' | 'unavailable';
 
 export interface SprintPaceRequestDto {
   sprintName: string;
@@ -173,6 +213,127 @@ export interface SprintPaceResponseDto {
   latencySeconds: number;
   inputTokens: number;
   outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
+  estimatedCostUsd: number;
+}
+
+/** One proposed copy-edit. `quote` is verbatim text from the description that the server already
+ *  verified exists (a finding whose quote didn't match was dropped server-side), so it can be shown
+ *  as a before/after pair without the UI having to re-check anything. */
+export interface DescriptionFindingDto {
+  kind: 'typo' | 'grammar' | 'unclear' | 'ambiguous';
+  quote: string;
+  suggestion: string;
+  why: string;
+}
+
+export interface DescriptionReviewResponseDto {
+  /** 'fine_as_is' is the common, expected answer — the feature working, not failing. */
+  verdict: 'fine_as_is' | 'needs_changes';
+  findings: DescriptionFindingDto[];
+  /** The original description with every finding applied, computed server-side from the original
+   *  rather than regenerated by the model (so HTML structure and attachment chips are preserved).
+   *  Null whenever there is nothing to apply. */
+  improvedDescription: string | null;
+  /** Findings the server discarded because their quoted text wasn't really in the description. */
+  droppedFindingCount: number;
+  /** Too little prose to be worth reviewing. */
+  skipped: boolean;
+  truncated: boolean;
+  degraded: boolean;
+  latencySeconds: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
+  estimatedCostUsd: number;
+}
+
+/** One earlier issue worth reading before starting the current work. */
+export interface PrecedentDto {
+  issueKey: string;
+  /** The candidate's real title, from the server's own records — never something the model wrote. */
+  title: string;
+  /** Why it's worth opening — what it actually has in common, not a similarity score. */
+  relevance: string;
+  /** The specific thing to reuse or avoid, when the source material actually stated one. */
+  takeaway: string | null;
+}
+
+export interface PrecedentResponseDto {
+  /** 'none_relevant' is a real answer: nothing here would genuinely help. */
+  verdict: 'found' | 'none_relevant';
+  precedents: PrecedentDto[];
+  /** How many retrieved issues the model was asked to judge — makes 'none_relevant' over a full
+   *  candidate set readable as a decision rather than as retrieval having come up empty. */
+  candidatesConsidered: number;
+  /** Retrieval found nothing above the similarity floor (a young space), not a failure. */
+  noCandidates: boolean;
+  degraded: boolean;
+  latencySeconds: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
+  estimatedCostUsd: number;
+}
+
+/** One comment as sent to /comment-digest — same fields the ticket detail modal already loaded via
+ *  commentApi, just enough to summarize (see ai-service/app/comment_digest/schemas.py::CommentIn). */
+export interface CommentDigestInputDto {
+  id: number;
+  authorName: string;
+  createdAt: string;
+  content: string;
+}
+
+/** A claim the digest makes, with the id(s) of the comment(s) that actually support it — the server
+ *  drops any claim whose ids don't resolve against the real thread (see
+ *  ai-service/app/comment_digest/service.py::_ground), so every point here is grounded. */
+export interface AttributedPointDto {
+  text: string;
+  commentIds: number[];
+}
+
+export interface ActionItemDto extends AttributedPointDto {
+  owner: string | null;
+}
+
+export interface CommentDigestResponseDto {
+  /** Why this thread exists — what prompted it. */
+  context: string;
+  /** What was actually debated — differing views, objections, what changed. Empty string when the
+   *  thread had no real back-and-forth (a single status update, an unpushed-back answer). */
+  discussion: string;
+  /** Where the thread landed as of the last comment, with the comment(s) that establish it — this is
+   *  also where a reached decision belongs (there's no separate decisions list: showing "what was
+   *  decided" twice, once here and once as its own cited item, read as redundant rather than as two
+   *  different pieces of information). Empty text when nothing was resolved. */
+  outcome: AttributedPointDto;
+  openQuestions: AttributedPointDto[];
+  actionItems: ActionItemDto[];
+  /** Too few comments to be worth summarizing — not a failure, just nothing to show. */
+  skipped: boolean;
+  /** Model/provider call failed — context/discussion/outcome/etc. are empty; the raw comment list is
+   *  still there for the user to read directly. */
+  degraded: boolean;
+  /** >0 means only the most recent comments were sent to the model (see _MAX_COMMENTS server-side);
+   *  the digest may be missing context from earlier in the thread. */
+  truncatedCount: number;
+  latencySeconds: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
   estimatedCostUsd: number;
 }
 
@@ -276,6 +437,15 @@ export interface RecoveryStatusDto {
   resumable: boolean;
 }
 
+export interface ActiveRecoveryLookupDto {
+  availability: 'none' | 'resumable' | 'busy';
+  recovery: RecoveryStatusDto | null;
+  /** Present for a same-space teammate's active workflow. Optional for rolling compatibility with
+   *  the first availability response version. Never includes the private thread id or plan data. */
+  ownerUsername?: string | null;
+  currentStatus?: RecoveryStatus | null;
+}
+
 export interface RecoveryEscalationRoundDto {
   round: number;
   planName: string;
@@ -332,6 +502,14 @@ export interface RolloutStatusDto {
   error: string | null;
   sprintCapacityPoints: number | null;
   targetSprintCount: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  /** Of `inputTokens`, the portion served from the provider's prompt cache (billed ~10%).
+   *  `inputTokens` is the fresh count, so the raw provider total (what a trace shows) is
+   *  input + cached + output. Optional so a rolling deploy still parses an older backend. */
+  cachedInputTokens?: number;
+  estimatedCostUsd: number;
+  planningLatencySeconds: number;
 }
 
 export interface RolloutSprintTargetDto {
@@ -402,6 +580,23 @@ export const aiApi = {
    *  + recommendations — never calculates risk itself, see app/sprint_pace/schemas.py. */
   sprintPace: (req: SprintPaceRequestDto) =>
     api.post<SprintPaceResponseDto>('/api/ai/sprint-pace', req),
+  /** "Summarize comments": grounded summary/decisions/open-questions/action-items over an issue's
+   *  comment thread, each claim citing which comment(s) it came from. Stateless like draftTask — the
+   *  caller already has the comments loaded, so this sends bodies directly rather than an issue id. */
+  summarizeComments: (comments: CommentDigestInputDto[]) =>
+    api.post<CommentDigestResponseDto>('/api/ai/comment-digest', { comments }),
+  /** "Improve description": a copy-edit pass that abstains by default. Send the description exactly
+   *  as stored (HTML and all) — the server strips it for the model but applies the accepted edits to
+   *  this exact string, so a pre-stripped version would come back unusable. Persists nothing. */
+  reviewDescription: (description: string, title?: string) =>
+    api.post<DescriptionReviewResponseDto>('/api/ai/description-review', { description, title }),
+  /** "Link similar work items", built as a precedent finder: has this team already solved something
+   *  close, and what did they learn? Unlike the other issue-level AI calls this one retrieves, so
+   *  `spaceIds` is a real permission scope and is revalidated server-side against the caller. */
+  findPrecedents: (spaceIds: number[], issueKey: string, title: string, description: string) =>
+    api.post<PrecedentResponseDto>('/api/ai/precedents', {
+      spaceIds, issueKey, title, description,
+    }),
   /** Starts the durable Plan Epic lifecycle and pauses server-side at its editable preview. */
   startRollout: (
     proposal: string,
@@ -478,7 +673,11 @@ export const aiApi = {
    *  `startSprintRecovery(Stream)` always minted a fresh thread. Called on mount, before offering
    *  "Diagnose Sprint Risk"; null means no non-terminal thread exists for this sprint, not an error. */
   findActiveSprintRecovery: (spaceId: number, sprintId: number) =>
-    api.get<RecoveryStatusDto | null>(`/api/ai/sprint-recovery/by-sprint?space_id=${spaceId}&sprint_id=${sprintId}`),
+    // The union is intentional rolling-deploy compatibility. Older ai-service versions returned a
+    // bare status or null; the modal normalizes both while the backend and browser bundle restart.
+    api.get<ActiveRecoveryLookupDto | RecoveryStatusDto | null>(
+      `/api/ai/sprint-recovery/by-sprint?space_id=${spaceId}&sprint_id=${sprintId}`,
+    ),
   /** Answers the one specific clarifying question the confidence gate raised — folded in as evidence,
    *  loops back into diagnosis (bounded by the server-side max_clarification_rounds). */
   answerSprintRecoveryClarification: (threadId: string, answer: string) =>

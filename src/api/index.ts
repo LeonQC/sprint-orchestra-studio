@@ -1,4 +1,5 @@
 export { api } from './client';
+export { ApiError } from './apiError';
 export { authApi } from './authApi';
 export { userApi } from './userApi';
 export { groupApi } from './groupApi';
@@ -44,6 +45,14 @@ export type {
   SprintRiskLevel,
   SprintPaceRequestDto,
   SprintPaceResponseDto,
+  PrecedentDto,
+  PrecedentResponseDto,
+  DescriptionFindingDto,
+  DescriptionReviewResponseDto,
+  CommentDigestInputDto,
+  AttributedPointDto,
+  ActionItemDto,
+  CommentDigestResponseDto,
   RolloutStatus,
   RolloutPlanDto,
   RolloutStatusDto,
@@ -55,6 +64,7 @@ export type {
   RecoveryHypothesisDto,
   RecoveryEvidenceDto,
   RecoveryStatusDto,
+  ActiveRecoveryLookupDto,
   RecoveryCheckpointDto,
 } from './aiApi';
 export type {

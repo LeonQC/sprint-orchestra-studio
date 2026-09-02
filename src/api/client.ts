@@ -1,3 +1,5 @@
+import { parseApiError } from './apiError';
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
 
 if (import.meta.env.DEV && /:8081(\/|$)/.test(BASE_URL)) {
@@ -83,16 +85,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!res.ok) {
     if (res.status === 401) handleUnauthorized(bearerSent);
     const text = await res.text().catch(() => '');
-    let message = `API error ${res.status}`;
-    if (text) {
-      try {
-        const body = JSON.parse(text) as { message?: string; error?: string };
-        message = body.message ?? body.error ?? text;
-      } catch {
-        message = text;
-      }
-    }
-    throw new Error(message);
+    throw parseApiError(res.status, text);
   }
   if (res.status === 204) return undefined as T;
 
@@ -132,16 +125,7 @@ async function raw(path: string, options?: RequestInit): Promise<Response> {
   if (!res.ok) {
     if (res.status === 401) handleUnauthorized(bearerSent);
     const text = await res.text().catch(() => '');
-    let message = `API error ${res.status}`;
-    if (text) {
-      try {
-        const body = JSON.parse(text) as { message?: string; error?: string };
-        message = body.message ?? body.error ?? text;
-      } catch {
-        message = text;
-      }
-    }
-    throw new Error(message);
+    throw parseApiError(res.status, text);
   }
   return res;
 }

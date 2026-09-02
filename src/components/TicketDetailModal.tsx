@@ -27,6 +27,9 @@ import { formatDueDateWithTime } from '../utils/dueDate';
 const LIFECYCLE_BAR_ZOOM_MAX_MULT = 14;
 import { attachmentApi, historyApi, issueApi, labelApi } from '../api';
 import type { IssueAttachmentDto, IssueHistoryDto, LabelDto } from '../api';
+import { CommentDigestModal } from './CommentDigestModal';
+import { DescriptionReviewModal } from './DescriptionReviewModal';
+import { PrecedentModal } from './PrecedentModal';
 import {
   containsHtmlMarkup,
   escapeCommentHtml,
@@ -570,6 +573,10 @@ export function TicketDetailModal({
   const linkTextInputRef = useRef<HTMLInputElement>(null);
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const aiMenuRef = useRef<HTMLDivElement>(null);
+  const [commentDigestOpen, setCommentDigestOpen] = useState(false);
+  const [descriptionReviewOpen, setDescriptionReviewOpen] = useState(false);
+  const [precedentOpen, setPrecedentOpen] = useState(false);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   /** Jira-style "⋯" actions menu — destructive actions live here, away from the ✕ close. */
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -1218,6 +1225,23 @@ export function TicketDetailModal({
     setEditingCommentText(initialHtml);
     setEditingCommentAttachmentNames(Array.from(new Set([...namesFromText, ...namesFromHtml])));
   }
+
+  /** Jumps from a Summarize Comments citation (see CommentDigestModal) to the comment it cites —
+   *  switches to the Comments tab (the only one commentsForActivityList populates), closes the
+   *  digest modal, and briefly highlights the target so it's easy to spot among the others. */
+  function handleJumpToComment(commentId: number) {
+    setCommentDigestOpen(false);
+    setActivityTab('comments');
+    setHighlightedCommentId(String(commentId));
+  }
+
+  useEffect(() => {
+    if (!highlightedCommentId) return;
+    const el = document.getElementById(`ticket-detail-comment-${highlightedCommentId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => setHighlightedCommentId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [highlightedCommentId]);
 
   async function handleSaveEditComment() {
     if (!editingCommentId || !ticket.dbId) return;
@@ -2220,6 +2244,18 @@ export function TicketDetailModal({
                       className="ticket-detail__ai-menu__item"
                       onClick={() => {
                         setAiMenuOpen(false);
+                        if (opt.id === 'summarize-comments') {
+                          setCommentDigestOpen(true);
+                          return;
+                        }
+                        if (opt.id === 'improve-description') {
+                          setDescriptionReviewOpen(true);
+                          return;
+                        }
+                        if (opt.id === 'link-similar') {
+                          setPrecedentOpen(true);
+                          return;
+                        }
                         alert(`AI: "${opt.label}" — coming soon. (Will call agentic AI backend.)`);
                       }}
                     >
@@ -2678,7 +2714,11 @@ export function TicketDetailModal({
                   <p className="ticket-detail__no-comments">No comments yet.</p>
                 )}
                 {commentsForActivityList.slice().reverse().map((c) => (
-                  <div key={c.id} className="ticket-detail__comment">
+                  <div
+                    key={c.id}
+                    id={`ticket-detail-comment-${c.id}`}
+                    className={`ticket-detail__comment${highlightedCommentId === c.id ? ' ticket-detail__comment--highlighted' : ''}`}
+                  >
                     <div className="ticket-detail__avatar">{c.author.charAt(0).toUpperCase()}</div>
                     <div className="ticket-detail__comment-body">
                       <div className="ticket-detail__comment-meta">
@@ -3449,6 +3489,53 @@ export function TicketDetailModal({
                 </>
               )}
             </div>,
+            document.body,
+          )
+        : null}
+      {precedentOpen
+        ? createPortal(
+            <PrecedentModal
+              ticketKey={ticket.id}
+              title={draft.title ?? ''}
+              description={draft.description ?? ''}
+              spaceIds={[Number(currentSpace.id)]}
+              onAddIssueLink={onAddIssueLink}
+              ticketDbId={ticket.dbId}
+              existingRelationsByKey={existingRelationsByKey}
+              onClose={() => setPrecedentOpen(false)}
+            />,
+            document.body,
+          )
+        : null}
+      {descriptionReviewOpen
+        ? createPortal(
+            <DescriptionReviewModal
+              ticketKey={ticket.id}
+              description={draft.description ?? ''}
+              title={draft.title}
+              onApply={async (improved) => {
+                const updated: Ticket = { ...draft, description: improved };
+                setDraft(updated);
+                await Promise.resolve(onUpdate(updated));
+              }}
+              onClose={() => setDescriptionReviewOpen(false)}
+            />,
+            document.body,
+          )
+        : null}
+      {commentDigestOpen
+        ? createPortal(
+            <CommentDigestModal
+              ticketKey={ticket.id}
+              comments={(draft.comments ?? []).map((c) => ({
+                id: Number(c.id),
+                authorName: c.author,
+                createdAt: c.createdAt,
+                content: c.content,
+              }))}
+              onJumpToComment={handleJumpToComment}
+              onClose={() => setCommentDigestOpen(false)}
+            />,
             document.body,
           )
         : null}
