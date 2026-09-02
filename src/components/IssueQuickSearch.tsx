@@ -8,20 +8,27 @@ import type { Ticket, TicketStatus } from '../types/ticket';
 import { searchApi } from '../api';
 import type { SearchResultDto } from '../api';
 import { IssueKeyChip } from './IssueKeyChip';
+import {
+  INITIAL_VISIBLE,
+  PAGE_SIZE,
+  applyExactFilter,
+  hitKey,
+  matchedFieldLabels,
+  rankLocalMatches,
+  snippetFor,
+  visibleSlice,
+} from './quickSearchUtils';
 import './IssueQuickSearch.css';
 
-/** First paint size. */
-const INITIAL_VISIBLE = 8;
-/** How many extra rows each “Show more” click adds. */
-const PAGE_SIZE = 2;
-/** Soft cap so a huge space cannot freeze the dropdown. */
-const HARD_CAP = 10;
 /** Debounce for the backend full-text call — avoid firing on every keystroke. */
 const REMOTE_DEBOUNCE_MS = 300;
 /** Don't hit the backend for single-character queries; too noisy, too broad. */
 const REMOTE_MIN_QUERY_LENGTH = 2;
-/** Cross-space / comment hits shown below the quick-jump list. */
-const REMOTE_LIMIT = 8;
+/**
+ * Cross-space / comment hits shown below the quick-jump list. Matches SearchService's own
+ * MAX_LIMIT ceiling so the backend half isn't the thing that truncates results.
+ */
+const REMOTE_LIMIT = 50;
 
 const STATUS_LABELS: Record<TicketStatus, string> = {
   planned: 'Planned',
@@ -42,26 +49,6 @@ const STATUS_COLORS: Record<TicketStatus, string> = {
 type CombinedItem =
   | { kind: 'local'; ticket: Ticket }
   | { kind: 'remote'; hit: SearchResultDto };
-
-/** Rank matches: issue-key hit first, then title-start, then any substring. */
-function scoreMatch(ticket: Ticket, q: string): number | null {
-  const key = ticket.id.toLowerCase();
-  const title = ticket.title.toLowerCase();
-  const assignee = (ticket.assignee ?? '').toLowerCase();
-  if (key === q) return 0;
-  if (key.startsWith(q)) return 1;
-  if (key.includes(q)) return 2;
-  if (title.startsWith(q)) return 3;
-  if (title.includes(q)) return 4;
-  if (assignee.includes(q)) return 5;
-  return null;
-}
-
-function createdAtMs(t: Ticket): number {
-  if (!t.createdAt) return 0;
-  const ms = Date.parse(t.createdAt);
-  return Number.isFinite(ms) ? ms : 0;
-}
 
 /**
  * The backend wraps matched terms in literal "<b>"/"</b>" (Postgres `ts_headline`
@@ -106,34 +93,19 @@ export function IssueQuickSearch() {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const [remoteResults, setRemoteResults] = useState<SearchResultDto[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
+  const [exactOnly, setExactOnly] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const requestIdRef = useRef(0);
 
-  const rankedMatches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [] as Ticket[];
-    return tickets
-      .map((t) => ({ t, score: scoreMatch(t, q) }))
-      .filter((r): r is { t: Ticket; score: number } => r.score !== null)
-      .sort((a, b) => {
-        // 1) Better match quality first
-        if (a.score !== b.score) return a.score - b.score;
-        // 2) Same quality → newest first (Jira-like recency)
-        const byTime = createdAtMs(b.t) - createdAtMs(a.t);
-        if (byTime !== 0) return byTime;
-        // 3) Stable fallback
-        return a.t.id.localeCompare(b.t.id);
-      })
-      .map((r) => r.t);
-  }, [tickets, query]);
+  const rankedMatches = useMemo(() => rankLocalMatches(tickets, query), [tickets, query]);
 
-  const totalMatched = rankedMatches.length;
-  const cappedPool = rankedMatches.slice(0, HARD_CAP);
-  const results = cappedPool.slice(0, visibleCount);
-  const canShowMoreInDropdown = results.length < cappedPool.length;
-  const nextBatch = Math.min(PAGE_SIZE, cappedPool.length - results.length);
-  const remainingOutsideCap = Math.max(0, totalMatched - HARD_CAP);
+  const slice = useMemo(() => visibleSlice(rankedMatches, visibleCount), [rankedMatches, visibleCount]);
+  const results = slice.rows;
+  const totalMatched = slice.total;
+  const canShowMoreInDropdown = slice.canShowMore;
+  const nextBatch = slice.nextBatch;
+  const remainingOutsideCap = slice.beyondCap;
 
   // The quick-jump list above already covers title/key matches in the current space;
   // don't repeat the same issue in the full-text section below it.
@@ -142,15 +114,22 @@ export function IssueQuickSearch() {
     () => remoteResults.filter((r) => !(r.type === 'ISSUE' && localIds.has(r.issueKey))),
     [remoteResults, localIds],
   );
+  // "Exact only" is applied to the full-text half alone: the quick-jump list above is already
+  // literal-only by construction (see scoreMatch), so there is nothing there for it to filter.
+  const visibleRemote = useMemo(
+    () => applyExactFilter(dedupedRemote, exactOnly),
+    [dedupedRemote, exactOnly],
+  );
+  const hiddenByExact = dedupedRemote.length - visibleRemote.length;
 
   const spaceById = useMemo(() => new Map(spaces.map((s) => [Number(s.id), s])), [spaces]);
 
   const combined: CombinedItem[] = useMemo(
     () => [
       ...results.map((ticket): CombinedItem => ({ kind: 'local', ticket })),
-      ...dedupedRemote.map((hit): CombinedItem => ({ kind: 'remote', hit })),
+      ...visibleRemote.map((hit): CombinedItem => ({ kind: 'remote', hit })),
     ],
-    [results, dedupedRemote],
+    [results, visibleRemote],
   );
 
   useEffect(() => {
@@ -316,13 +295,11 @@ export function IssueQuickSearch() {
                 {totalMatched > results.length && (
                   <span className="iqs__meta-hint">
                     {' '}
-                    · showing {results.length}
-                    {remainingOutsideCap > 0 || canShowMoreInDropdown ? ` of ${Math.min(totalMatched, HARD_CAP)}` : ''}
+                    · showing {results.length} of {totalMatched}
                   </span>
                 )}
               </div>
-              {results.map((t) => {
-                const i = combined.findIndex((c) => c.kind === 'local' && c.ticket.id === t.id);
+              {results.map((t, i) => {
                 const meta = t.issueType ? ISSUE_TYPE_META[t.issueType] : undefined;
                 const status = t.status;
                 return (
@@ -364,7 +341,7 @@ export function IssueQuickSearch() {
                   className="iqs__more"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
-                    setVisibleCount((n) => Math.min(n + PAGE_SIZE, HARD_CAP));
+                    setVisibleCount((n) => n + PAGE_SIZE);
                     setActiveIndex(0);
                   }}
                 >
@@ -382,22 +359,47 @@ export function IssueQuickSearch() {
           {showRemoteSection && (
             <>
               <div className="iqs__section-label">
-                All spaces &amp; comments
+                All spaces · all fields
                 {remoteLoading && <span className="iqs__loading-dot" aria-hidden />}
+                {/* Sits inside the existing section header rather than adding a toolbar: it filters
+                    this section only, and the header is already a flex row with room on the right. */}
+                <label className="iqs__exact-toggle" title="Show only results that contain your text exactly — hides stemmed (orders/order) and near-spelling matches">
+                  <input
+                    type="checkbox"
+                    checked={exactOnly}
+                    onChange={(e) => {
+                      setExactOnly(e.target.checked);
+                      setActiveIndex(0);
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                  />
+                  Exact only
+                </label>
               </div>
-              {dedupedRemote.length === 0 && !remoteLoading && (
+              {visibleRemote.length === 0 && !remoteLoading && (
                 <div className="iqs__empty iqs__empty--remote">
-                  No full-text matches for “{query.trim()}”.
+                  {hiddenByExact > 0 ? (
+                    <>
+                      No exact matches for “{query.trim()}” — {hiddenByExact} near match
+                      {hiddenByExact === 1 ? ' is' : 'es are'} hidden. Uncheck “Exact only” to see
+                      {hiddenByExact === 1 ? ' it' : ' them'}.
+                    </>
+                  ) : (
+                    <>No full-text matches for “{query.trim()}”.</>
+                  )}
                 </div>
               )}
-              {dedupedRemote.map((hit) => {
-                const i = combined.findIndex(
-                  (c) => c.kind === 'remote' && c.hit.type === hit.type && c.hit.issueId === hit.issueId,
-                );
+              {visibleRemote.map((hit, hitIndex) => {
+                // Key by hitKey, not by issueId: several comments on one issue are several rows, and
+                // collapsing them gives duplicate React keys — which strands filtered-out rows in
+                // the DOM instead of removing them. See hitKey().
+                const key = hitKey(hit, hitIndex);
+                // `combined` is the local rows followed by these, in order — so no search needed.
+                const i = results.length + hitIndex;
                 const space = spaceById.get(hit.spaceId);
                 return (
                   <Link
-                    key={`${hit.type}-${hit.issueId}`}
+                    key={key}
                     to={`/ticket/${hit.issueKey}`}
                     role="option"
                     aria-selected={i === activeIndex}
@@ -433,13 +435,33 @@ export function IssueQuickSearch() {
                           ~ fuzzy
                         </span>
                       )}
+                      {hit.matchType === 'SUBSTRING' && (
+                        <span className="iqs__fuzzy-badge" title="Substring match — your text appears inside a longer word or field, not as a whole word">
+                          contains
+                        </span>
+                      )}
                       {space && (
                         <span className="iqs__space-badge" style={{ borderColor: space.color, color: space.color }}>
                           {space.key}
                         </span>
                       )}
                     </div>
-                    {hit.snippet && <div className="iqs__snippet">{renderSnippet(hit.snippet)}</div>}
+                    {matchedFieldLabels(hit.matchedFields).length > 0 && (
+                      // Why this row is a hit. With labels/attachment-filenames/description all
+                      // searchable, a title that looks unrelated to the query is otherwise baffling.
+                      <div className="iqs__matched-fields">
+                        matched in{' '}
+                        {matchedFieldLabels(hit.matchedFields).map((label, li) => (
+                          <span key={label} className="iqs__field-badge">
+                            {li > 0 ? ' · ' : ''}
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {snippetFor(hit, exactOnly) && (
+                      <div className="iqs__snippet">{renderSnippet(snippetFor(hit, exactOnly))}</div>
+                    )}
                   </Link>
                 );
               })}

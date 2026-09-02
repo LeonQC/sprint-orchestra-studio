@@ -193,6 +193,37 @@
   color: var(--text-muted, #94a3b8);
 }
 
+/* Right-aligned inside the existing .iqs__section-label flex row, inheriting its muted type so it
+   reads as part of the header rather than a separate control. */
+.iqs__exact-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  font-size: inherit;
+  font-weight: 500;
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.iqs__exact-toggle input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent, #6366f1);
+}
+
+.iqs__matched-fields {
+  padding-left: 1.25rem;
+  font-size: 0.625rem;
+  line-height: 1.35;
+  color: var(--text-muted, #94a3b8);
+}
+
+.iqs__field-badge {
+  font-weight: 600;
+}
+
 .iqs__snippet {
   padding-left: 1.25rem;
   font-size: 0.75rem;
