@@ -17,7 +17,7 @@
 .sr-badge--diagnosing, .sr-badge--awaiting_clarification { background: #eff6ff; color: #2563eb; }
 .sr-badge--awaiting_plan_approval { background: #eff6ff; color: #2563eb; }
 .sr-badge--no_risk_found { background: #f0fdf4; color: #16a34a; }
-.sr-badge--committing, .sr-badge--waiting_reevaluation { background: #fefce8; color: #ca8a04; }
+.sr-badge--committing, .sr-badge--committed, .sr-badge--waiting_reevaluation { background: #fefce8; color: #ca8a04; }
 .sr-badge--recovered { background: #f0fdf4; color: #16a34a; }
 .sr-badge--escalated { background: #fef2f2; color: #dc2626; }
 
@@ -425,43 +425,106 @@
   gap: 6px;
 }
 
-/* Status row: the old `.rl-status-row` packed a badge, a counter and a button together with no gap,
-   so "Needs a human decision" ran straight into "Attempt 3". Explicit gaps + a spacer that pushes the
-   button to the right edge, and it wraps instead of overflowing on a narrow modal. */
-.sr-status-row {
+/* Keep progress, controls and usage as separate information groups. The old single row made a status,
+   attempt counter, token cost and history action all look equally important. */
+.sr-status-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 14px;
+  border: 1px solid #dbeafe;
+  border-left: 4px solid #60a5fa;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.sr-status-card--no_risk_found,
+.sr-status-card--recovered {
+  border-color: #bbf7d0;
+  border-left-color: #22c55e;
+  background: #f7fef9;
+}
+
+.sr-status-card--escalated,
+.sr-status-card--failed {
+  border-color: #fecaca;
+  border-left-color: #ef4444;
+  background: #fffafa;
+}
+
+.sr-status-card--committing,
+.sr-status-card--committed,
+.sr-status-card--waiting_reevaluation {
+  border-color: #fde68a;
+  border-left-color: #eab308;
+  background: #fffef7;
+}
+
+.sr-status-card__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sr-status-card__eyebrow {
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sr-status-card__title-row,
+.sr-status-card__actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 4px;
+  gap: 8px;
 }
 
-.sr-status-row__spacer {
-  flex: 1 1 auto;
+.sr-status-card__description {
+  max-width: 590px;
+  margin: 0;
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.sr-status-card__actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
 }
 
 .sr-attempt {
-  font-size: 0.78rem;
-  color: #475569;
-  background: #f1f5f9;
-  border-radius: 999px;
-  padding: 3px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: #64748b;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  padding: 5px 9px;
   white-space: nowrap;
   cursor: help;
 }
 
-/* Same pill shape as `.sr-attempt` — it belongs to the same row of "facts about this run" — in a
-   monospace face so a cost and a token count stay easy to compare across runs at a glance. */
-.sr-cost {
+.sr-attempt span {
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sr-attempt strong {
+  color: #334155;
   font-size: 0.75rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  padding: 2px 9px;
-  white-space: nowrap;
-  cursor: help;
+}
+
+@media (max-width: 640px) {
+  .sr-status-card { flex-direction: column; }
+  .sr-status-card__actions { width: 100%; justify-content: flex-start; }
 }
 
 /* The "?" affordance next to either retry entry point, plus the panel it opens. One shared style for
@@ -575,6 +638,105 @@
   color: #3730a3;
   font-size: 0.8rem;
   line-height: 1.4;
+}
+
+.sr-availability {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #fde68a;
+  border-left: 4px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.sr-availability--error {
+  border-color: #fecaca;
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+
+.sr-availability__icon {
+  flex: none;
+  font-size: 1.1rem;
+  line-height: 1.4;
+}
+
+.sr-availability__content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sr-availability__content strong {
+  color: #78350f;
+  font-size: 0.88rem;
+}
+
+.sr-availability--error .sr-availability__content strong {
+  color: #991b1b;
+}
+
+.sr-availability__content p {
+  margin: 4px 0 0;
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.sr-availability__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.sr-availability__facts > div {
+  padding: 8px 10px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.sr-availability__facts > div:last-child {
+  grid-column: 1 / -1;
+}
+
+.sr-availability__facts dt {
+  color: #92400e;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sr-availability__facts dd {
+  margin: 3px 0 0;
+  color: #334155;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.sr-availability__facts dd > strong {
+  color: #0f172a;
+  font-size: inherit;
+}
+
+.sr-availability__next {
+  font-weight: 600;
+}
+
+.sr-availability__detail {
+  color: #991b1b !important;
+  font-size: 0.74rem !important;
+}
+
+@media (max-width: 640px) {
+  .sr-availability { flex-wrap: wrap; }
+  .sr-availability .bl-btn { margin-left: 2rem; }
+  .sr-availability__facts { grid-template-columns: 1fr; }
+  .sr-availability__facts > div:last-child { grid-column: auto; }
 }
 
 /* Found live: `.rl-error` (shared across every modal in this app) has no styling defined anywhere —
@@ -1006,4 +1168,3 @@
   justify-content: flex-end;
   gap: 8px;
 }
-

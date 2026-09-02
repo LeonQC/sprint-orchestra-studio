@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { aiApi } from '../api';
+import { aiApi, ApiError } from '../api';
 import type { RecoveryActionDto, RecoveryCheckpointDto, RecoveryStatusDto } from '../api';
+import { AiUsageCard } from './AiUsageCard';
+import { normalizeRecoveryLookup } from './recoveryAvailability';
 import { Tooltip } from './Tooltip';
 import './SprintRecoveryModal.css';
 
@@ -176,12 +178,28 @@ const STATUS_LABELS: Record<string, string> = {
   awaiting_clarification: 'Waiting for your answer',
   awaiting_plan_approval: 'Waiting for your decision',
   committing: 'Applying changes in Jira…',
+  committed: 'Changes saved in Jira',
   waiting_reevaluation: 'Watching for changes',
   recovered: 'Fixed ✅',
   escalated: 'Needs a human decision',
   rejected: 'Stopped',
   revising: 'Coming up with new plans…',
   failed: "Couldn't finish",
+};
+
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  diagnosing: 'Reviewing sprint activity and evidence to understand what may put delivery at risk.',
+  no_risk_found: 'No current delivery risk was found. You can review the evidence below.',
+  awaiting_clarification: 'The check needs one answer from you before it can recommend a recovery plan.',
+  awaiting_plan_approval: 'A recovery plan is ready. Review the choices below; Jira will not change until you approve one.',
+  committing: 'Applying only the recovery action you approved in Jira.',
+  committed: 'The approved recovery action was saved in Jira.',
+  waiting_reevaluation: 'The approved change is in Jira. The workflow is waiting to see whether sprint risk improves.',
+  recovered: 'The latest check shows that the sprint is back on track.',
+  escalated: 'The workflow needs a person to decide what happens next. The reason and prior attempts are shown below.',
+  rejected: 'This recovery run was stopped. It will not make any more changes in Jira.',
+  revising: 'Using your feedback to prepare different recovery choices.',
+  failed: 'The workflow could not finish. Review the error below before trying again.',
 };
 
 // Human phrasing for `next` — which node a checkpoint is about to run. Combined with `status` below
@@ -288,11 +306,12 @@ interface SprintRecoveryModalProps {
  */
 export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: SprintRecoveryModalProps) {
   const [state, setState] = useState<RecoveryStatusDto | null>(null);
-  // Found live: closing this modal (or a real ai-service crash) loses `state.threadId` from browser
-  // memory, and "Diagnose Sprint Risk" always started a brand new thread — there was no way back to
-  // an in-progress check, even though it was still fully resumable server-side. True only for the
-  // instant it takes to ask; the button below is hidden while this is true so it can't be raced.
-  const [checkingForExisting, setCheckingForExisting] = useState(true);
+  const [availability, setAvailability] = useState<'checking' | 'none' | 'busy' | 'error'>('checking');
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  const [busyRecovery, setBusyRecovery] = useState<{
+    ownerUsername: string | null;
+    currentStatus: string | null;
+  } | null>(null);
   // Distinguishes "I clicked Analyze just now" from "this modal found and reopened a check nobody in
   // this browser tab started" — worth saying explicitly, not left for the reader to infer from the
   // status alone, especially the first time someone sees a plan appear without ever clicking anything.
@@ -344,28 +363,45 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
     };
   }, []);
 
-  // Resume-in-progress-check-if-one-exists, instead of always offering a fresh start. Reproduced live
-  // the gap this closes: kill ai-service mid-commit, restart, reopen this modal — before this, there
-  // was no way back to the interrupted thread short of already knowing its thread_id (e.g. from server
-  // logs), even though it was fully resumable. A failure here (network hiccup, ai-service still
-  // restarting) falls back to the normal fresh-start screen rather than blocking the modal open.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const existing = await aiApi.findActiveSprintRecovery(spaceId, sprintId);
-        if (!cancelled && existing) {
-          setState(existing);
-          setResumedExisting(true);
-        }
-      } catch {
-        /* no existing check found, or ai-service isn't reachable yet — fresh-start screen covers both */
-      } finally {
-        if (!cancelled) setCheckingForExisting(false);
+  // There are three safe product states: no active run, this user's resumable run, or another
+  // teammate's run. A lookup failure is *not* treated as "none": doing so offers a start action whose
+  // precondition is unknown and recreates the raw 409 screen this check exists to prevent.
+  const refreshAvailability = useCallback(async () => {
+    setAvailability('checking');
+    setAvailabilityError(null);
+    setState(null);
+    setResumedExisting(false);
+    setBusyRecovery(null);
+    try {
+      const lookup = normalizeRecoveryLookup(await aiApi.findActiveSprintRecovery(spaceId, sprintId));
+      if (lookup.availability === 'resumable' && lookup.recovery) {
+        setState(lookup.recovery);
+        setResumedExisting(true);
+        return 'resumable' as const;
       }
-    })();
-    return () => { cancelled = true; };
+      const nextAvailability = lookup.availability === 'busy' ? 'busy' : 'none';
+      if (nextAvailability === 'busy') {
+        setBusyRecovery({
+          ownerUsername: lookup.ownerUsername ?? null,
+          currentStatus: lookup.currentStatus ?? null,
+        });
+      }
+      setAvailability(nextAvailability);
+      return nextAvailability;
+    } catch (err) {
+      setAvailability('error');
+      setAvailabilityError(
+        err instanceof Error
+          ? err.message
+          : 'Could not check whether a recovery is already in progress.',
+      );
+      return 'error' as const;
+    }
   }, [spaceId, sprintId]);
+
+  useEffect(() => {
+    void refreshAvailability();
+  }, [refreshAvailability]);
 
   useEffect(() => {
     if (!isWaiting) {
@@ -439,7 +475,18 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
       const result = await aiApi.startSprintRecoveryStream(spaceId, sprintId, sprintName, setStageLabel);
       setState(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (err instanceof ApiError && err.status === 409) {
+        // A second tab or teammate may have started after the initial availability check. Reconcile
+        // with the server instead of surfacing a race-condition response as an error.
+        const reconciled = await refreshAvailability();
+        if (reconciled === 'none') {
+          // A pre-upgrade backend hides another owner's run as null. The 409 is authoritative: even
+          // if its legacy lookup cannot describe "busy", do not offer the same doomed start again.
+          setAvailability('busy');
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setStarting(false);
       setStageLabel(null);
@@ -494,6 +541,7 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
    *  reuse the old thread_id: a rejected workflow is done, a fresh Analyze starts a genuinely new one. */
   function handleStartOver() {
     setState(null);
+    setAvailability('none');
     setRevisionFeedback('');
     setError(null);
   }
@@ -548,12 +596,63 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
           <button type="button" className="bl-modal__close" onClick={onClose}>✕</button>
         </div>
         <div className="bl-modal__body sr-body">
-          {!state && checkingForExisting && (
+          {!state && availability === 'checking' && (
             <p className="rl-hint">
               <span className="sr-spinner" aria-hidden="true" /> Checking for a check already in progress…
             </p>
           )}
-          {!state && !checkingForExisting && (
+          {!state && availability === 'busy' && (
+            <div className="sr-availability sr-availability--busy" role="status">
+              <div className="sr-availability__icon" aria-hidden="true">🔒</div>
+              <div className="sr-availability__content">
+                <strong>A recovery check is already in progress</strong>
+                <dl className="sr-availability__facts">
+                  <div>
+                    <dt>Workflow owner</dt>
+                    <dd>{busyRecovery?.ownerUsername ?? 'Another teammate'}</dd>
+                  </div>
+                  <div>
+                    <dt>Current step</dt>
+                    <dd>
+                      {busyRecovery?.currentStatus
+                        ? STATUS_LABELS[busyRecovery.currentStatus] ?? busyRecovery.currentStatus.replace(/_/g, ' ')
+                        : 'Recovery is still active'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>What to do next</dt>
+                    <dd>
+                      {busyRecovery?.ownerUsername
+                        ? <>Sign in as <strong>{busyRecovery.ownerUsername}</strong> to continue, reject, or stop this workflow.</>
+                        : 'Ask the teammate who started it to continue, reject, or stop the workflow.'}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="sr-availability__next">
+                  A second check is disabled to prevent overlapping plans or duplicate Jira changes.
+                </p>
+              </div>
+              <button type="button" className="bl-btn bl-btn--outline" onClick={() => void refreshAvailability()}>
+                Check again
+              </button>
+            </div>
+          )}
+          {!state && availability === 'error' && (
+            <div className="sr-availability sr-availability--error" role="alert">
+              <div className="sr-availability__icon" aria-hidden="true">⚠️</div>
+              <div className="sr-availability__content">
+                <strong>We couldn't confirm whether this sprint already has a recovery check</strong>
+                <p>
+                  Starting another check could create overlapping work, so diagnosis is temporarily disabled.
+                </p>
+                {availabilityError && <p className="sr-availability__detail">{availabilityError}</p>}
+              </div>
+              <button type="button" className="bl-btn bl-btn--outline" onClick={() => void refreshAvailability()}>
+                Try again
+              </button>
+            </div>
+          )}
+          {!state && availability === 'none' && (
             <>
               <p className="rl-hint">
                 Checks this sprint for real signs of risk, explains what might be going wrong (every
@@ -576,8 +675,22 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
                   "Diagnose Sprint Risk" again to get back here.
                 </p>
               )}
-              <div className="sr-status-row">
-                <span className={`rl-badge sr-badge--${state.status}`}>{STATUS_LABELS[state.status] ?? state.status}</span>
+              <section className={`sr-status-card sr-status-card--${state.status}`} aria-live="polite">
+                <div className="sr-status-card__main">
+                  <span className="sr-status-card__eyebrow">Current workflow status</span>
+                  <div className="sr-status-card__title-row">
+                    <span className={`rl-badge sr-badge--${state.status}`}>{STATUS_LABELS[state.status] ?? state.status}</span>
+                    {busy && (
+                      <span className="sr-waiting">
+                        <span className="sr-spinner" aria-hidden="true" /> {stageLabel ?? 'working…'} ({elapsed}s)
+                      </span>
+                    )}
+                  </div>
+                  <p className="sr-status-card__description">
+                    {STATUS_DESCRIPTIONS[state.status] ?? 'Review the workflow details below.'}
+                  </p>
+                </div>
+                <div className="sr-status-card__actions">
                 {/* Found live: this showed "Attempt 1 of 3" on a sprint that got handed to a human on
                     the very first pass — because no issue-level action was even possible, not because
                     3 attempts were exhausted (see plan_node's immediate-handoff branch). "Attempt 1 of
@@ -588,25 +701,9 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
                   (state.status === 'escalated' && state.escalationRounds.length === 0)
                 ) && (
                   <Tooltip text={`The AI gets ${state.maxEscalationRounds + 1} attempts to fix this before handing the decision to a person.`}>
-                    <span className="sr-attempt">
-                      Attempt {state.escalationRound + 1} of {state.maxEscalationRounds + 1}
-                    </span>
-                  </Tooltip>
-                )}
-                {/* Token counts are real — every LLM call in this workflow reports its own usage back
-                    from the provider. The dollar figure is not: it's `tokens * a static $/model price
-                    table` (ai-service/app/llm/pricing.py), the same table that's already drifted from
-                    real pricing once in this project (see that file's "Found live" comment) — so it's
-                    an honest estimate against real usage, not billing data. Said explicitly in the
-                    tooltip rather than implied, and shown to 4 decimal places instead of collapsing
-                    every sub-cent run to "<$0.01", which hid the actual number this question is about. */}
-                {state.tokenUsage > 0 && (
-                  <Tooltip text={`${state.tokenUsage.toLocaleString()} tokens — a real count reported by the model provider. The $ figure is computed from a static price table (ai-service/app/llm/pricing.py), not billing data from the provider, so treat it as an estimate applied to real usage.`}>
-                    <span className="sr-cost">
-                      {state.costUsd > 0
-                        ? `$${state.costUsd.toFixed(state.costUsd >= 0.01 ? 2 : 4)}`
-                        : 'free (local model)'}
-                      {' · '}{(state.tokenUsage / 1000).toFixed(1)}k tokens
+                    <span className="sr-attempt" aria-label={`Recovery attempt ${state.escalationRound + 1} of ${state.maxEscalationRounds + 1}`}>
+                      <span>Recovery attempt</span>
+                      <strong>{state.escalationRound + 1} of {state.maxEscalationRounds + 1}</strong>
                     </span>
                   </Tooltip>
                 )}
@@ -620,16 +717,20 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
                     <span className="sr-stale-caveat">⚠ unconfirmed sync</span>
                   </Tooltip>
                 )}
-                {busy && (
-                  <span className="sr-waiting">
-                    <span className="sr-spinner" aria-hidden="true" /> {stageLabel ?? 'working…'} ({elapsed}s)
-                  </span>
-                )}
-                <span className="sr-status-row__spacer" />
                 <button type="button" className="bl-btn bl-btn--outline" onClick={handleLoadHistory} disabled={busy}>
                   View past steps
                 </button>
-              </div>
+                </div>
+              </section>
+              {state.tokenUsage > 0 && (
+                <AiUsageCard
+                  title="AI recovery usage"
+                  description="Cumulative usage for this recovery run, including retries"
+                  totalTokens={state.tokenUsage}
+                  estimatedCostUsd={state.costUsd}
+                  compact
+                />
+              )}
               {/* Two different reasons land on status="escalated", and they read very differently:
                   either the AI tried several plans and none worked (handled below, with a round-by-
                   round breakdown), or — this case — it never had anything it could act on in the first
