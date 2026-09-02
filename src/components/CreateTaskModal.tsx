@@ -8,6 +8,17 @@ import { usersInSpace } from '../utils/issueUserFields';
 import { effectiveSpaceMemberIds } from '../types/space';
 import { aiApi, labelApi } from '../api';
 import type { LabelDto, SemanticSearchHitDto } from '../api';
+import {
+  applyDraftLabels,
+  EMPTY_DRAFT_LABEL_SELECTION,
+  toggleDraftLabel,
+} from '../utils/draftLabels';
+import {
+  rationaleForCurrentPoints,
+  suggestedEstimate,
+  withEstimateRationale,
+  type DraftEstimate,
+} from '../utils/draftEstimate';
 import { IssueKeyChip } from './IssueKeyChip';
 
 const STATUS_OPTIONS: { value: TicketStatus; label: string }[] = [
@@ -59,7 +70,11 @@ export function CreateTaskModal({
   const [storyPoints, setStoryPoints] = useState('');
   const [startDate, setStartDate] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  // Tracks which labels came from the AI draft vs. the user's own clicks, so re-running the
+  // draft replaces its own previous suggestions instead of piling onto them — see
+  // src/utils/draftLabels.ts for the ownership rules and the bug that motivated them.
+  const [labelSelection, setLabelSelection] = useState(EMPTY_DRAFT_LABEL_SELECTION);
+  const selectedLabels = labelSelection.selected;
   const [spaceLabels, setSpaceLabels] = useState<LabelDto[]>([]);
   const titleRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +88,9 @@ export function CreateTaskModal({
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiDegraded, setAiDegraded] = useState(false);
   const [aiDependencies, setAiDependencies] = useState<string[]>([]);
+  /** The last draft's estimate and the sentence justifying it, kept together so the explanation can
+   *  fall away when the user overrides the number — see src/utils/draftEstimate.ts. */
+  const [aiEstimate, setAiEstimate] = useState<DraftEstimate | null>(null);
   /** What the last successful AI draft actually changed — the only positive confirmation the user
    *  gets that the call did something, since the fields it fills are the same ones they can edit by
    *  hand (a silently-unchanged-looking title otherwise reads as "nothing happened"). */
@@ -108,11 +126,12 @@ export function CreateTaskModal({
     setDupLoading(true);
     setDupChecked(false);
     try {
-      // `score` is real cosine similarity (0-1) — the backend only returns results clearing a
-      // minimum-relevance floor server-side (excludes noisy attachment-OCR chunks too — see
-      // ai-service/app/search/service.py), so an empty result here means "genuinely nothing similar
-      // enough," not just "these were the least-bad top 3." Still purely informational — never
-      // blocks issue creation either way.
+      // The backend only returns results clearing a minimum-relevance floor server-side (excludes
+      // noisy attachment-OCR chunks too — see ai-service/app/search/service.py), so an empty result
+      // here means "genuinely nothing similar enough," not just "these were the least-bad top 3."
+      // Display `confidence`, never `score`: with reranking on (the default) `score` is an unbounded
+      // cross-encoder logit, and rendering it as a percentage showed a 6.395 as "640% match".
+      // Still purely informational — never blocks issue creation either way.
       const res = await aiApi.search(query, [Number(currentSpace.id)], 3);
       setDupHits(res.results);
     } catch {
@@ -128,6 +147,7 @@ export function CreateTaskModal({
     setAiLoading(true);
     setAiError(null);
     setAiApplied(null);
+    setAiEstimate(null);
     try {
       const { draft, degraded } = await aiApi.draftTask(
         description.trim(),
@@ -140,13 +160,14 @@ export function CreateTaskModal({
         applied.push('type');
       }
       if (draft.labels.length > 0) {
-        setSelectedLabels((prev) => Array.from(new Set([...prev, ...draft.labels])));
+        setLabelSelection((prev) => applyDraftLabels(prev, draft.labels));
         applied.push(`${draft.labels.length} label${draft.labels.length !== 1 ? 's' : ''}`);
       }
       if (draft.estimateStoryPoints != null) {
         setStoryPoints(String(draft.estimateStoryPoints));
         applied.push('estimate');
       }
+      setAiEstimate(suggestedEstimate(draft.estimateStoryPoints, draft.estimateRationale));
       setAiDependencies(draft.dependencies);
       setAiDegraded(degraded);
       setAiApplied(applied);
@@ -158,7 +179,7 @@ export function CreateTaskModal({
   }
 
   function toggleLabel(name: string) {
-    setSelectedLabels((prev) => (prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name]));
+    setLabelSelection((prev) => toggleDraftLabel(prev, name));
   }
 
   useEffect(() => {
@@ -178,19 +199,23 @@ export function CreateTaskModal({
     const assignToSprint = issueType !== 'epic' && Boolean(sprintId);
     const requiresPoints = assignToSprint && issueType !== 'subtask';
     const parsedPoints = Number(storyPoints);
-    if (requiresPoints && !(Number.isFinite(parsedPoints) && parsedPoints > 0)) return;
+    const hasPoints = Number.isFinite(parsedPoints) && parsedPoints > 0;
+    if (requiresPoints && !hasPoints) return;
     const ticket: Ticket = {
       id: resolvedNextId,
       title: title.trim(),
       issueType,
-      description: description.trim() || undefined,
+      description: withEstimateRationale(description, appliedRationale),
       status,
       assignee: assignee || undefined,
       assigneeId: assigneeUser ? Number(assigneeUser.id) : undefined,
       reporter: currentUser.name,
       reporterId: Number(currentUser.id),
-      storyPoints: requiresPoints ? parsedPoints : undefined,
-      labels: selectedLabels.length ? selectedLabels : undefined,
+      // Estimable off-sprint too: a backlog issue can carry points (they're just not required
+      // there), and dropping them whenever no sprint was selected silently threw away both what the
+      // user typed and what the AI draft suggested.
+      storyPoints: supportsPoints && hasPoints ? parsedPoints : undefined,
+      labels: selectedLabels.length ? [...selectedLabels] : undefined,
       startDate: startDate || undefined,
       dueDate: dueDate || undefined,
       ...(assignToSprint
@@ -204,6 +229,12 @@ export function CreateTaskModal({
       onClose();
     }
   }
+
+  // Epics roll up their children's points and subtasks aren't estimated, so neither takes an
+  // estimate; everything else does, sprint or backlog.
+  const supportsPoints = issueType !== 'epic' && issueType !== 'subtask';
+  const pointsRequired = supportsPoints && Boolean(sprintId);
+  const appliedRationale = rationaleForCurrentPoints(aiEstimate, storyPoints);
 
   return (
     <div className="modal-overlay" onMouseDown={onClose}>
@@ -332,7 +363,7 @@ export function CreateTaskModal({
                 </div>
                 {dupHits.map((hit) => (
                   <div key={hit.issueId} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.72rem', minWidth: 32 }}>{Math.round(hit.score * 100)}%</span>
+                    <span style={{ fontWeight: 700, fontSize: '0.72rem', minWidth: 32 }}>{Math.round(hit.confidence * 100)}%</span>
                     <IssueKeyChip issueKey={hit.issueKey} size="sm" />
                     <span>{hit.snippet.slice(0, 100)}{hit.snippet.length > 100 ? '…' : ''}</span>
                   </div>
@@ -422,10 +453,12 @@ export function CreateTaskModal({
             </select>
           </div>
 
-          {sprintId && issueType !== 'epic' && issueType !== 'subtask' && (
+          {supportsPoints && (
             <div className="modal__field">
               <label className="modal__label" htmlFor="task-points">
-                Story Points <span className="modal__required">*</span>
+                Story Points {pointsRequired
+                  ? <span className="modal__required">*</span>
+                  : <span className="modal__label-hint"> — optional for backlog issues</span>}
               </label>
               <input
                 id="task-points"
@@ -435,8 +468,14 @@ export function CreateTaskModal({
                 step="1"
                 value={storyPoints}
                 onChange={(event) => setStoryPoints(event.target.value)}
-                required
+                required={pointsRequired}
               />
+              {appliedRationale && (
+                <p style={{ margin: '6px 0 0', fontSize: '0.78rem', color: '#64748b' }}>
+                  AI rationale: {appliedRationale} — saved with the issue; edit the number above to
+                  drop it.
+                </p>
+              )}
             </div>
           )}
 
@@ -481,13 +520,7 @@ export function CreateTaskModal({
             <button
               type="submit"
               className="modal__btn modal__btn--confirm"
-              disabled={
-                !title.trim()
-                || (Boolean(sprintId)
-                  && issueType !== 'epic'
-                  && issueType !== 'subtask'
-                  && !(Number(storyPoints) > 0))
-              }
+              disabled={!title.trim() || (pointsRequired && !(Number(storyPoints) > 0))}
             >
               Create
             </button>

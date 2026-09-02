@@ -4689,6 +4689,14 @@
 .ticket-detail__comment {
   display: flex;
   gap: 0.75rem;
+  border-radius: 8px;
+  transition: background-color 0.4s ease;
+}
+
+/* Jumped to from a Summarize Comments citation (see CommentDigestModal) — a brief highlight so the
+   cited comment is easy to spot among the others, not a permanent style. */
+.ticket-detail__comment--highlighted {
+  background-color: #fef3c7;
 }
 
 .ticket-detail__comment-body {
@@ -5309,6 +5317,13 @@
 
 .modal__required {
   color: #ef4444;
+}
+
+/* Counterpart to .modal__required: marks a field that is genuinely optional in this context (e.g.
+   Story Points on a backlog issue, which only becomes required once a sprint is selected). */
+.modal__label-hint {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 .modal__input,

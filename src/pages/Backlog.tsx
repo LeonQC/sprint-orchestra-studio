@@ -13,6 +13,7 @@ import { SprintRecoveryModal } from '../components/SprintRecoveryModal';
 import { SprintPaceModal } from '../components/SprintPaceModal';
 import { IssueFilterPanel } from '../components/IssueFilterPanel';
 import { Tooltip, TooltipExplainer } from '../components/Tooltip';
+import { SPRINT_PACE_HELP, SPRINT_RECOVERY_HELP } from '../utils/sprintAiHelp';
 import { useCurrentUser } from '../context/UserContext';
 import { useSpaces } from '../context/SpaceContext';
 import { effectiveSpaceMemberIds } from '../types/space';
@@ -32,6 +33,7 @@ import {
 } from '../utils/issueFilters';
 import { getDirectChildren, isSubtask } from '../utils/ticketHierarchy';
 import { computeSprintPaceStats } from '../utils/sprintPaceStats';
+import { bindInlineIssueToSprint, parseInlineStoryPoints } from '../utils/inlineIssueCreate';
 import './Backlog.css';
 
 /** Jira-style: epics are never sprint-scoped in the UI; they always bucket with backlog. */
@@ -252,8 +254,8 @@ function InlineCreate({ onSave, onCancel, requirePoints = false }: InlineCreateP
   useEffect(() => { ref.current?.focus(); }, []);
 
   function handleSave() {
-    const parsedPoints = Number(points);
-    if (value.trim() && (!requirePoints || (Number.isFinite(parsedPoints) && parsedPoints > 0))) {
+    const parsedPoints = parseInlineStoryPoints(points);
+    if (value.trim() && (!requirePoints || parsedPoints !== undefined)) {
       onSave(value.trim(), requirePoints ? parsedPoints : undefined);
     }
   }
@@ -291,7 +293,7 @@ function InlineCreate({ onSave, onCancel, requirePoints = false }: InlineCreateP
         type="button"
         className="bl-btn bl-btn--primary"
         onClick={handleSave}
-        disabled={!value.trim() || (requirePoints && !(Number(points) > 0))}
+        disabled={!value.trim() || (requirePoints && parseInlineStoryPoints(points) === undefined)}
       >
         Create
       </button>
@@ -872,13 +874,17 @@ function SprintSection({
               <Tooltip
                 text={
                   <TooltipExplainer
-                    title="What it does"
-                    description="Turns this sprint's points, days remaining, and basic issue flags (blocked, stale, no estimate) into a plain-language summary and a few suggestions."
-                    note="🔒 Read-only — never changes anything in Jira."
+                    {...SPRINT_PACE_HELP}
                   />
                 }
+                wide
               >
-                <span className="bl-sprint__help-icon" aria-label="What does Sprint pace check do?">?</span>
+                <button
+                  type="button"
+                  className="bl-sprint__help-icon"
+                  aria-label="Show Sprint pace check criteria"
+                  onClick={(event) => event.preventDefault()}
+                >?</button>
               </Tooltip>
             </span>
           )}
@@ -900,13 +906,17 @@ function SprintSection({
               <Tooltip
                 text={
                   <TooltipExplainer
-                    title="What it does"
-                    description="Investigates why this sprint might be at risk — blocked issues, an overloaded owner, work added late — using real evidence pulled from Jira, then proposes a fix plan. Goes deeper than Sprint pace check's summary: this looks at individual issues, not just the aggregate."
-                    note="🔒 Nothing is written to Jira until you review and approve a plan."
+                    {...SPRINT_RECOVERY_HELP}
                   />
                 }
+                wide
               >
-                <span className="bl-sprint__help-icon" aria-label="What does AI recovery do?">?</span>
+                <button
+                  type="button"
+                  className="bl-sprint__help-icon"
+                  aria-label="Show Diagnose risk criteria"
+                  onClick={(event) => event.preventDefault()}
+                >?</button>
               </Tooltip>
             </span>
           )}
@@ -1402,7 +1412,7 @@ export function Backlog() {
         onCreateIssue={() => setCreatingIn(sprint.id)}
         onTicketClick={(id) => openTicket(id)}
         isCreating={creatingIn === sprint.id}
-        onSaveIssue={(title) => handleCreateIssue(sprint.id, title)}
+        onSaveIssue={bindInlineIssueToSprint(handleCreateIssue, sprint.id)}
         onCancelCreate={() => setCreatingIn(null)}
       />
     );
@@ -1587,7 +1597,7 @@ export function Backlog() {
           onTicketClick={(id) => openTicket(id)}
           isCreating={creatingIn === 'backlog'}
           onCreateIssue={() => setCreatingIn('backlog')}
-          onSaveIssue={(title) => handleCreateIssue(null, title)}
+          onSaveIssue={bindInlineIssueToSprint(handleCreateIssue, null)}
           onCancelCreate={() => setCreatingIn(null)}
         />
       </DragDropContext>

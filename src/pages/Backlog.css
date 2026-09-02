@@ -182,12 +182,21 @@
   color: #64748b;
   font-size: 0.65rem;
   font-weight: 700;
+  padding: 0;
+  border: 0;
+  font-family: inherit;
+  cursor: help;
   user-select: none;
 }
 
 .bl-sprint__help-icon:hover {
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+.bl-sprint__help-icon:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
 }
 
 /* Atlaskit-style default button — matches Jira Cloud backlog "Complete sprint" */
