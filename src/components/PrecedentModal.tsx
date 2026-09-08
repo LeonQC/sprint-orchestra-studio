@@ -7,7 +7,7 @@ import { AiUsageCard } from './AiUsageCard';
 import { IssueKeyChip } from './IssueKeyChip';
 import './PrecedentModal.css';
 
-const FEATURE = 'precedents';
+const FEATURE = 'link_similar_work_items';
 /** The relation this modal creates — "relates to" is the one Jira relation that doesn't assert an
  *  order or a blocking dependency, matching what "found as a similar work item" actually means. */
 const LINK_RELATION = 'relates to';

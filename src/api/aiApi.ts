@@ -14,8 +14,10 @@ import { api } from './client';
  *  outputs can't be meaningfully streamed token-by-token, so this streams *checkpoint* labels instead,
  *  resolving once a `result` frame arrives). Shared by `askStream` and the sprint-recovery stream
  *  variants below rather than duplicating this parser per endpoint. */
-async function consumeStageStream<T>(path: string, body: unknown, onStage?: (label: string) => void): Promise<T> {
-  const res = await api.postStream(path, body);
+async function consumeStageStream<T>(
+  path: string, body: unknown, onStage?: (label: string) => void, headers?: HeadersInit,
+): Promise<T> {
+  const res = await api.postStream(path, body, headers);
   const reader = res.body?.getReader();
   if (!reader) throw new Error('Streaming is not supported in this browser.');
   const decoder = new TextDecoder();
@@ -143,9 +145,22 @@ export interface ModelUsageDto {
   pricingStatus: 'free_local' | 'estimated' | 'unavailable';
 }
 
+export interface ClarificationOptionDto {
+  label: string;
+  issueKey?: string;
+}
+
 export interface AskResponseDto {
   answer: string;
   abstained: boolean;
+  /** True when `answer` is a clarification QUESTION, not a completed answer — the agent found
+   *  several independently plausible sources and is asking which one, rather than guessing (see
+   *  ai-service's ground rule 2b / `ask_clarification` tool). Render `answer` as the question text
+   *  and `clarificationOptions` as a picker instead of the normal markdown answer body; the same
+   *  `answer` field carries both shapes, so this flag must be checked before rendering it as prose. */
+  needsClarification?: boolean;
+  /** Present (2-5 entries) whenever `needsClarification` is true; absent/empty otherwise. */
+  clarificationOptions?: ClarificationOptionDto[];
   retrievalRounds: number;
   queriesUsed: string[];
   citations: CitationDto[];
@@ -162,6 +177,13 @@ export interface AskResponseDto {
   routeTool?: string;
   cacheHit: boolean;
   stageTimings?: StageTimingsDto;
+  /** A W3C `traceparent` naming this call's own entrypoint span (see ai-service's
+   *  `_current_traceparent`). Send it back as a literal `traceparent` request header on the next
+   *  `ask`/`askStream` call in the same conversation (see `aiApi.ask`'s `traceParent` param) so that
+   *  request's span joins this same trace instead of starting a disconnected one — the fix for a
+   *  clarification round (or any other follow-up) showing up as two separate traces. Optional so a
+   *  rolling frontend deploy still accepts an older backend. */
+  traceParent?: string;
 }
 
 export interface SemanticSearchHitDto {
@@ -285,7 +307,7 @@ export interface PrecedentResponseDto {
   estimatedCostUsd: number;
 }
 
-/** One comment as sent to /comment-digest — same fields the ticket detail modal already loaded via
+/** One comment as sent to /summarize-comments — same fields the ticket detail modal already loaded via
  *  commentApi, just enough to summarize (see ai-service/app/comment_digest/schemas.py::CommentIn). */
 export interface CommentDigestInputDto {
   id: number;
@@ -561,17 +583,30 @@ export const aiApi = {
    *  see gateway route ai-service-ask's comment for the trust-boundary note on that parameter.
    *  `history` (optional, oldest-first) lets a follow-up resolve context from earlier turns — this
    *  service is stateless, so the caller (AskAiPanel) owns the running transcript and resends it on
-   *  every call; omit/pass `[]` for an independent question. */
-  ask: (question: string, spaceIds: number[], history: ChatTurnDto[] = []) =>
-    api.post<AskResponseDto>('/api/ai/ask', { question, space_ids: spaceIds, history }),
+   *  every call; omit/pass `[]` for an independent question. `traceParent` is the previous turn's own
+   *  `AskResponseDto.traceParent` (undefined for the first question of a conversation) — sent as a
+   *  real `traceparent` request header so this call's server span joins the same trace as the rest of
+   *  the conversation instead of starting a new one; see that field's doc comment. */
+  ask: (question: string, spaceIds: number[], history: ChatTurnDto[] = [], traceParent?: string) =>
+    api.post<AskResponseDto>(
+      '/api/ai/ask', { question, space_ids: spaceIds, history },
+      traceParent ? { traceparent: traceParent } : undefined,
+    ),
   /** SSE variant of `ask`: identical request/response shape, but `onStage` fires with a
    *  human-readable progress label ("searching the knowledge base", "verifying and finalizing the
    *  answer", ...) as the agent loop passes through each checkpoint it already goes through, instead
    *  of the caller seeing nothing until the whole answer is ready. Resolves with the same
    *  `AskResponseDto` `ask()` returns once the backend's "result" event arrives. See
-   *  ai-service/app/api/routes.py's `POST /ask/stream` and `CragAgent.ask`'s `on_stage` parameter. */
-  askStream: (question: string, spaceIds: number[], history: ChatTurnDto[] = [], onStage?: (label: string) => void) =>
-    consumeStageStream<AskResponseDto>('/api/ai/ask/stream', { question, space_ids: spaceIds, history }, onStage),
+   *  ai-service/app/api/routes.py's `POST /ask/stream` and `CragAgent.ask`'s `on_stage` parameter.
+   *  `traceParent`: see `ask()`'s parameter of the same name. */
+  askStream: (
+    question: string, spaceIds: number[], history: ChatTurnDto[] = [],
+    onStage?: (label: string) => void, traceParent?: string,
+  ) =>
+    consumeStageStream<AskResponseDto>(
+      '/api/ai/ask/stream', { question, space_ids: spaceIds, history }, onStage,
+      traceParent ? { traceparent: traceParent } : undefined,
+    ),
   /** Retrieval only, no LLM — ranked issues (deduped, best chunk per issue), not a generated answer.
    *  Backs both the "find related issues" search mode and duplicate-issue detection. */
   search: (query: string, spaceIds: number[], limit = 10) =>
@@ -584,7 +619,7 @@ export const aiApi = {
    *  comment thread, each claim citing which comment(s) it came from. Stateless like draftTask — the
    *  caller already has the comments loaded, so this sends bodies directly rather than an issue id. */
   summarizeComments: (comments: CommentDigestInputDto[]) =>
-    api.post<CommentDigestResponseDto>('/api/ai/comment-digest', { comments }),
+    api.post<CommentDigestResponseDto>('/api/ai/summarize-comments', { comments }),
   /** "Improve description": a copy-edit pass that abstains by default. Send the description exactly
    *  as stored (HTML and all) — the server strips it for the model but applies the accepted edits to
    *  this exact string, so a pre-stripped version would come back unusable. Persists nothing. */
@@ -594,7 +629,7 @@ export const aiApi = {
    *  close, and what did they learn? Unlike the other issue-level AI calls this one retrieves, so
    *  `spaceIds` is a real permission scope and is revalidated server-side against the caller. */
   findPrecedents: (spaceIds: number[], issueKey: string, title: string, description: string) =>
-    api.post<PrecedentResponseDto>('/api/ai/precedents', {
+    api.post<PrecedentResponseDto>('/api/ai/link-similar-work-items', {
       spaceIds, issueKey, title, description,
     }),
   /** Starts the durable Plan Epic lifecycle and pauses server-side at its editable preview. */

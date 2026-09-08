@@ -62,7 +62,7 @@ function AttributedList({
 
 export function CommentDigestModal({ ticketKey, comments, onJumpToComment, onClose }: CommentDigestModalProps) {
   const fingerprint = aiFingerprint(comments.map((c) => `${c.id}:${c.content}`));
-  const cached = getCachedAiResult<CommentDigestResponseDto>('comment-digest', ticketKey, fingerprint);
+  const cached = getCachedAiResult<CommentDigestResponseDto>('summarize_comments', ticketKey, fingerprint);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +88,7 @@ export function CommentDigestModal({ ticketKey, comments, onJumpToComment, onClo
         // free respectively — worth remembering anyway so reopening the popup doesn't re-show the
         // loading spinner for something that already resolved, but neither is "the real answer",
         // so a degraded run in particular should be easy to retry rather than sticky.
-        setCachedAiResult('comment-digest', ticketKey, fingerprint, res);
+        setCachedAiResult('summarize_comments', ticketKey, fingerprint, res);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Comment summary failed.'))
       .finally(() => setLoading(false));

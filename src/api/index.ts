@@ -39,6 +39,7 @@ export type {
   CitationDto,
   ChatTurnDto,
   AskResponseDto,
+  ClarificationOptionDto,
   SemanticSearchHitDto,
   SemanticSearchResponseDto,
   FlaggedIssueDto,

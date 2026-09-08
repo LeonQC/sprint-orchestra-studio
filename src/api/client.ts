@@ -132,8 +132,8 @@ async function raw(path: string, options?: RequestInit): Promise<Response> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+  post: <T>(path: string, body?: unknown, headers?: HeadersInit) =>
+    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined, headers }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
@@ -146,6 +146,6 @@ export const api = {
   /** Auth'd POST returning the raw `Response`, body untouched — for `text/event-stream` endpoints
    *  where the caller needs `res.body`'s `ReadableStream` instead of a parsed JSON result (see
    *  aiApi.askStream). Everything else (base URL, Bearer token, 401 handling) matches `api.post`. */
-  postStream: (path: string, body?: unknown) =>
-    raw(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }),
+  postStream: (path: string, body?: unknown, headers?: HeadersInit) =>
+    raw(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined }),
 };

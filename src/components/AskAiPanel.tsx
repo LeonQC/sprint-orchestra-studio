@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSpaces } from '../context/SpaceContext';
 import { aiApi } from '../api';
-import type { AskResponseDto, ChatTurnDto } from '../api';
+import type { AskResponseDto, ChatTurnDto, ClarificationOptionDto } from '../api';
 import { IssueKeyChip } from './IssueKeyChip';
 import { AiUsageCard } from './AiUsageCard';
 import { formatDuration } from '../utils/formatDuration';
@@ -28,6 +28,116 @@ const SUGGESTED_PROMPTS = [
 interface ConversationTurn {
   question: string;
   result: AskResponseDto;
+  /** Set when the user dismissed a clarification with "Never mind" instead of answering it. The
+   *  turn stays visible (greyed, non-interactive) so the thread still reads truthfully, but it is
+   *  dropped from the derived `history` below — a dangling "which source did you mean?" exchange
+   *  would otherwise be sent as context for whatever the user asks next and skew that answer. */
+  abandoned?: boolean;
+}
+
+/** Renders an ask_clarification turn as a picker: one option per independently plausible source,
+ *  plus a free-text fallback for "none of these" — mirrors the suggested-prompt chip's "click to
+ *  submit" pattern (`.aa-suggestion`) rather than introducing a new interaction model. Picking an
+ *  option or submitting the free-text field both just call `onPick`, which the parent wires to the
+ *  SAME `handleSubmit` a normal typed question uses — the choice becomes the next message in
+ *  `history`, so the model resolves it in conversational context instead of needing a distinct
+ *  "answer to a clarification" endpoint or payload shape.
+ *
+ *  `interactive` is false for every turn except the latest: an earlier clarification has already
+ *  been superseded by whatever the user picked next, and re-rendering it as clickable would let a
+ *  stale picker resubmit a question the conversation has moved past. */
+function ClarificationPrompt({
+  question,
+  options,
+  interactive,
+  abandoned,
+  onPick,
+  onAbandon,
+}: {
+  question: string;
+  options: ClarificationOptionDto[];
+  interactive: boolean;
+  abandoned: boolean;
+  onPick: (text: string) => void;
+  onAbandon: () => void;
+}) {
+  const [otherText, setOtherText] = useState('');
+
+  function submitOther() {
+    const text = otherText.trim();
+    if (!text) return;
+    onPick(text);
+    setOtherText('');
+  }
+
+  // The user asked something the agent couldn't pin to one source and would rather move on than
+  // answer "which one?" — without this the only exits are closing the panel or "New chat", both of
+  // which cost the whole thread. Dropping the turn from `history` (see ConversationTurn.abandoned)
+  // is what keeps the unanswered clarification from being sent as context for the next question.
+  if (abandoned) {
+    return (
+      <div className="aa-clarification aa-clarification--abandoned">
+        <p className="aa-clarification__question">{question}</p>
+        <p className="aa-clarification__abandoned-note">Skipped — this question was left unanswered.</p>
+      </div>
+    );
+  }
+
+  // Empty when the agent has no genuine candidates to offer — a question this vague ("What does
+  // the attachment say?" with nothing else identifying which one) gets a plain open question
+  // instead of a menu of unrelated top-k hits dressed up as choices (see ask_clarification's tool
+  // description, "situation 2"). The options block and its divider only make sense when there's
+  // something above the text field to divide it from.
+  const hasOptions = options.length > 0;
+
+  return (
+    <div className="aa-clarification">
+      <p className="aa-clarification__question">{question}</p>
+      {hasOptions && (
+        <div className="aa-clarification__options">
+          {options.map((opt, oi) => (
+            <button
+              key={oi}
+              type="button"
+              className="aa-suggestion aa-clarification__option"
+              disabled={!interactive}
+              onClick={() => onPick(opt.label)}
+            >
+              {opt.issueKey && <IssueKeyChip issueKey={opt.issueKey} size="sm" />}
+              <span>{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className={`aa-clarification__other${hasOptions ? ' aa-clarification__other--divided' : ''}`}>
+        <input
+          type="text"
+          className="aa-clarification__other-input"
+          placeholder={hasOptions ? 'Or type your own answer…' : 'Type your answer…'}
+          value={otherText}
+          disabled={!interactive}
+          onChange={(e) => setOtherText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitOther(); } }}
+        />
+        <button
+          type="button"
+          className="aa-clarification__other-submit"
+          disabled={!interactive || !otherText.trim()}
+          onClick={submitOther}
+        >
+          Send
+        </button>
+      </div>
+      <button
+        type="button"
+        className="aa-clarification__abandon"
+        disabled={!interactive}
+        onClick={onAbandon}
+      >
+        Never mind — skip this question
+      </button>
+    </div>
+  );
 }
 
 export function AskAiPanel({ onClose }: AskAiPanelProps) {
@@ -55,12 +165,21 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
   // just each turn's question + final answer text, oldest first — recomputing it from `conversation`
   // means there's exactly one source of truth for "what has this chat said so far."
   const history: ChatTurnDto[] = useMemo(
-    () => conversation.flatMap((t): ChatTurnDto[] => [
-      { role: 'user', content: t.question },
-      { role: 'assistant', content: t.result.answer },
-    ]),
+    () => conversation
+      .filter((t) => !t.abandoned)  // a skipped clarification is not context for the next question
+      .flatMap((t): ChatTurnDto[] => [
+        { role: 'user', content: t.question },
+        { role: 'assistant', content: t.result.answer },
+      ]),
     [conversation],
   );
+
+  // The most recent turn's own traceParent — sent back as a real header on the NEXT call so that
+  // request's span joins the same trace instead of starting a new one (see aiApi.ask's `traceParent`
+  // doc comment). Undefined for the very first question, same as `history` being empty; "New chat"
+  // resets both the same way, by clearing `conversation`. Abandoned turns are skipped for the same
+  // reason they are dropped from `history` — the next question is not a continuation of one.
+  const lastTraceParent = conversation.filter((t) => !t.abandoned).at(-1)?.result.traceParent;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -128,7 +247,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
     setError(null);
     setStageLabel(null);
     try {
-      const result = await aiApi.askStream(question, spaceIds, history, setStageLabel);
+      const result = await aiApi.askStream(question, spaceIds, history, setStageLabel, lastTraceParent);
       setConversation((prev) => [...prev, { question, result }]);
       setQuery('');
     } catch (err) {
@@ -145,6 +264,15 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
   function handleClear() {
     setQuery('');
     setError(null);
+  }
+
+  /** "Never mind" on a clarification: keep the turn on screen (greyed) but mark it abandoned so it
+   *  leaves `history`, then the user can just type a new question without the unanswered "which
+   *  source?" tagging along as context. */
+  function handleAbandonClarification(turnIndex: number) {
+    setConversation((prev) =>
+      prev.map((t, i) => (i === turnIndex ? { ...t, abandoned: true } : t)),
+    );
   }
 
   /** Starts a fresh conversation: the one action that actually drops `history`, so a new,
@@ -232,7 +360,49 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                     <div className="aa-turn-answer__row">
                       <span className="aa-turn-answer__avatar" aria-hidden>✨</span>
                       <div className="aa-turn-answer__body">
-                        {turn.result.abstained ? (
+                        {turn.result.cacheHit && (
+                          // Rendered only on a hit: an uncached answer is the normal case and gets
+                          // no badge, so this never becomes decoration people stop reading. The
+                          // elapsed time is part of the badge rather than a separate line because
+                          // the number IS the claim — "Cached" alone invites "cached from where,
+                          // and did it actually save anything?", which a single-digit millisecond
+                          // figure answers on sight.
+                          <div
+                            className="aa-cached"
+                            title={
+                              'Served from the semantic answer cache — no retrieval and no LLM call. '
+                              + 'Cached answers are scoped to these spaces and are discarded '
+                              + 'automatically when anything they could depend on is re-indexed. '
+                              + 'Expand "Stage latency" for the per-stage proof.'
+                            }
+                          >
+                            <span className="aa-cached__icon" aria-hidden>⚡</span>
+                            <span>Cached</span>
+                            {turn.result.stageTimings && (
+                              <span className="aa-cached__meta">
+                                · {formatDuration(turn.result.stageTimings.totalMs)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {turn.result.needsClarification ? (
+                          // The agent found multiple plausible sources and is asking which one,
+                          // rather than guessing — see ai-service's ask_clarification tool. Picking
+                          // an option (or typing something else) resends it through the SAME
+                          // handleSubmit path a normal question takes: it becomes the next message
+                          // in `history`, so the model resolves it in context rather than needing a
+                          // separate reply mechanism. Only the latest turn gets clickable options —
+                          // an earlier turn's picker answering it now would silently reopen a
+                          // question the conversation has already moved past.
+                          <ClarificationPrompt
+                            question={turn.result.answer}
+                            options={turn.result.clarificationOptions ?? []}
+                            interactive={i === conversation.length - 1 && !loading && !turn.abandoned}
+                            abandoned={turn.abandoned ?? false}
+                            onPick={(text) => handleSubmit(text)}
+                            onAbandon={() => handleAbandonClarification(i)}
+                          />
+                        ) : turn.result.abstained ? (
                           // Render the backend's own answer text rather than separate hardcoded copy:
                           // it's the exact ABSTENTION_PHRASE contract ai-service guarantees
                           // (app/agent/crag_loop.py) — duplicating that string here would just be one
@@ -271,7 +441,16 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                             <summary className="aa-citations__summary">Stage latency</summary>
                             <div className="aa-citations__list">
                               <span className="aa-citation__snippet">
-                                cache lookup: {formatDuration(turn.result.stageTimings.cacheLookupMs)}
+                                {/* Exactly 0 does not mean "instant" — it means the cache was never
+                                    consulted at all. ai-service initialises this to 0.0 and only
+                                    overwrites it inside the branch that actually performs a lookup,
+                                    and a real lookup (a Redis round trip, plus an embedding call
+                                    when the exact tier misses) cannot come back under 5µs. Printing
+                                    "0ms" for it reads as a very fast hit and is how a cache that was
+                                    silently switched off went unnoticed for months. */}
+                                cache lookup: {turn.result.stageTimings.cacheLookupMs === 0
+                                  ? 'not consulted'
+                                  : formatDuration(turn.result.stageTimings.cacheLookupMs)}
                                 {' · '}retrieval: {formatDuration(turn.result.stageTimings.retrievalMs)}
                                 {' · '}LLM calls: {formatDuration(turn.result.stageTimings.llmMs)}
                                 {' · '}total: {formatDuration(turn.result.stageTimings.totalMs)}
