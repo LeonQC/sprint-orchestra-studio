@@ -156,6 +156,11 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
   // base") — null while idle or before the first event of a request arrives. Replaces a single
   // static "Working…" string with what the CragAgent loop is actually doing right now.
   const [stageLabel, setStageLabel] = useState<string | null>(null);
+  // Answer prose streamed from askStream's onToken while a request is in flight. Shown live as a
+  // plain-text preview under the progress indicator, then discarded the moment the authoritative
+  // `result` lands — that turn renders from `result.answer` (markdown, citations, and any
+  // verification rewrite the preview wouldn't have). Empty except during a streaming answer.
+  const [streamingText, setStreamingText] = useState('');
   // The running "ask" conversation — each entry is one question + its full answer. Follow-up
   // questions resolve against this (see `history` below); "New chat" is the only thing that clears
   // it, so an old topic's context never bleeds into an unrelated new one by accident.
@@ -246,8 +251,12 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
     setPendingQuestion(question);
     setError(null);
     setStageLabel(null);
+    setStreamingText('');
     try {
-      const result = await aiApi.askStream(question, spaceIds, history, setStageLabel, lastTraceParent);
+      const result = await aiApi.askStream(
+        question, spaceIds, history, setStageLabel, lastTraceParent,
+        (t) => setStreamingText((prev) => prev + t),
+      );
       setConversation((prev) => [...prev, { question, result }]);
       setQuery('');
     } catch (err) {
@@ -256,6 +265,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
       setLoading(false);
       setPendingQuestion(null);
       setStageLabel(null);
+      setStreamingText('');
     }
   }
 
@@ -510,6 +520,16 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                       falls back to a generic message for the brief gap before it does. */}
                   <span>{stageLabel ? `${stageLabel}…` : 'Retrieving relevant data and reasoning through an answer…'}</span>
                 </div>
+                {/* The answer prose as it streams in (askStream's onToken). Plain text with a
+                    blinking caret — not markdown — because a half-received document renders badly
+                    mid-parse; the completed turn below re-renders this same text properly (with
+                    citations, and any verification edit) the instant `result` arrives. */}
+                {streamingText && (
+                  <p className="aa-streaming-preview">
+                    {streamingText}
+                    <span className="aa-streaming-preview__caret" aria-hidden />
+                  </p>
+                )}
               </div>
             )}
 

@@ -16,6 +16,7 @@ import { api } from './client';
  *  variants below rather than duplicating this parser per endpoint. */
 async function consumeStageStream<T>(
   path: string, body: unknown, onStage?: (label: string) => void, headers?: HeadersInit,
+  onToken?: (text: string) => void,
 ): Promise<T> {
   const res = await api.postStream(path, body, headers);
   const reader = res.body?.getReader();
@@ -38,6 +39,12 @@ async function consumeStageStream<T>(
         const eventName = eventLine.slice('event: '.length);
         const data = JSON.parse(dataLine.slice('data: '.length));
         if (eventName === 'stage') onStage?.(data.label as string);
+        // A fragment of the final answer's prose as the model generates it (`/ask/stream` only).
+        // The free-text answer body — including an abstention the model writes out; a clarification
+        // and the forced-abstention fallback stream nothing. It is an optimistic preview: the
+        // `result` frame still carries the authoritative post-verification answer, and the caller
+        // must replace whatever streamed with `result.answer` (verification can rewrite the draft).
+        else if (eventName === 'token') onToken?.(data.text as string);
         else if (eventName === 'result') return data as T;
         else if (eventName === 'error') throw new Error((data.detail as string) ?? 'request failed');
       }
@@ -592,20 +599,24 @@ export const aiApi = {
       '/api/ai/ask', { question, space_ids: spaceIds, history },
       traceParent ? { traceparent: traceParent } : undefined,
     ),
-  /** SSE variant of `ask`: identical request/response shape, but `onStage` fires with a
-   *  human-readable progress label ("searching the knowledge base", "verifying and finalizing the
-   *  answer", ...) as the agent loop passes through each checkpoint it already goes through, instead
-   *  of the caller seeing nothing until the whole answer is ready. Resolves with the same
-   *  `AskResponseDto` `ask()` returns once the backend's "result" event arrives. See
-   *  ai-service/app/api/routes.py's `POST /ask/stream` and `CragAgent.ask`'s `on_stage` parameter.
+  /** SSE variant of `ask`: identical request/response shape, but the wait is surfaced as it
+   *  happens. `onStage` fires with a human-readable progress label ("searching the knowledge
+   *  base", ...) at each checkpoint; `onToken` fires with fragments of the final answer's prose as
+   *  the model generates it (answer body only — never a clarification or an abstention). The
+   *  streamed text is an optimistic preview: this still resolves with the authoritative
+   *  `AskResponseDto` once the "result" event arrives, and `result.answer` may differ from the sum
+   *  of the tokens because a verification pass can rewrite the draft — so the caller must replace
+   *  whatever streamed with `result.answer`. See ai-service/app/api/routes.py's `POST /ask/stream`.
    *  `traceParent`: see `ask()`'s parameter of the same name. */
   askStream: (
     question: string, spaceIds: number[], history: ChatTurnDto[] = [],
     onStage?: (label: string) => void, traceParent?: string,
+    onToken?: (text: string) => void,
   ) =>
     consumeStageStream<AskResponseDto>(
       '/api/ai/ask/stream', { question, space_ids: spaceIds, history }, onStage,
       traceParent ? { traceparent: traceParent } : undefined,
+      onToken,
     ),
   /** Retrieval only, no LLM — ranked issues (deduped, best chunk per issue), not a generated answer.
    *  Backs both the "find related issues" search mode and duplicate-issue detection. */
