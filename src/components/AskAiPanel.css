@@ -806,33 +806,14 @@
   40% { transform: translateY(-3px); opacity: 1; }
 }
 
-/* The answer as it streams in, before the real (markdown-rendered) turn replaces it. Same type
-   size and rhythm as .aa-answer so the swap on `result` is near-invisible, but held one shade
-   lighter and as pre-wrapped plain text — it is explicitly a preview, and raw markdown syntax
-   ("**", "- ", "(ATC-12)") looks less wrong flat than half-parsed. */
+/* The answer as it streams in, before the real (citations-and-all) turn replaces it on `result`.
+   Piggybacks on .aa-answer for markdown styling — see the .tsx note on why the preview is rendered
+   as markdown now — and is held one shade lighter so it still reads as a preview, not the final
+   answer. */
 .aa-streaming-preview {
   margin: 0.1rem 0 0;
   padding: 0 0.2rem;
-  font-size: 0.875rem;
-  line-height: 1.55;
   color: #334155;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.aa-streaming-preview__caret {
-  display: inline-block;
-  width: 0.5rem;
-  height: 1em;
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  background: #6366f1;
-  animation: aa-caret-blink 1s step-end infinite;
-}
-
-@keyframes aa-caret-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
 }
 
 /* "Served from the answer cache" marker on a single turn.

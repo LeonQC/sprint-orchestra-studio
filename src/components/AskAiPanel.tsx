@@ -520,15 +520,17 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                       falls back to a generic message for the brief gap before it does. */}
                   <span>{stageLabel ? `${stageLabel}…` : 'Retrieving relevant data and reasoning through an answer…'}</span>
                 </div>
-                {/* The answer prose as it streams in (askStream's onToken). Plain text with a
-                    blinking caret — not markdown — because a half-received document renders badly
-                    mid-parse; the completed turn below re-renders this same text properly (with
-                    citations, and any verification edit) the instant `result` arrives. */}
+                {/* The answer prose as it streams in (askStream's onToken), rendered as markdown as
+                    it grows so the reader never sees raw "**" / "- " mid-stream. react-markdown
+                    tolerates unclosed syntax — a trailing "**" shows literally until its partner
+                    arrives, then reflows. The completed turn below still replaces this wholesale the
+                    instant `result` lands (citations, and any verification rewrite). The "verifying
+                    and finalizing…" stage label + loading dots above carry the "still working" cue
+                    during the post-stream verification pause. */}
                 {streamingText && (
-                  <p className="aa-streaming-preview">
-                    {streamingText}
-                    <span className="aa-streaming-preview__caret" aria-hidden />
-                  </p>
+                  <div className="aa-answer aa-streaming-preview">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+                  </div>
                 )}
               </div>
             )}
