@@ -12,7 +12,6 @@ import type {
 } from '../api';
 import {
   hasCompleteBucketLayout,
-  isConcreteDependencyReason,
   isValidStoryPoint,
   needsExtraSprintAcceptance,
   nextManualTempId,
@@ -55,6 +54,17 @@ const EMPTY_USAGE: PlanUsage = {
   estimatedCostUsd: 0,
   latencySeconds: 0,
 };
+
+/** The prerequisites that will actually become `is blocked by` links in Jira on approval.
+ *
+ *  Everything else in `dependsOn` is ordering only: it shapes the topological sort and the sprint
+ *  packing, and a Jira issue link cannot express it (the tracker has blocks, clones, duplicates and
+ *  relates-to — none of which mean "do this later"). Showing those here would advertise a
+ *  relationship that vanishes the moment the plan is published, so this preview lists only what
+ *  publishing will really create. */
+function blockingPrerequisites(issue: IssueDraftDto): string[] {
+  return issue.dependsOn.filter((id) => issue.dependencyKinds?.[id] === 'blocks');
+}
 
 function AutoGrowTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   const { onChange, className, ...rest } = props;
@@ -267,12 +277,11 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
       0,
     );
   }, [issues]);
-  const dependencyReasonGapCount = useMemo(() => issues.reduce(
-    (count, issue) => count + issue.dependsOn.filter(
-      (dependency) => !isConcreteDependencyReason(issue.dependencyReasons?.[dependency]),
-    ).length,
-    0,
-  ), [issues]);
+
+  const blockingLinkCount = useMemo(
+    () => issues.reduce((count, issue) => count + blockingPrerequisites(issue).length, 0),
+    [issues],
+  );
 
   useEffect(() => {
     if (stage !== 'preview' || issues.length === 0 || unassignedIssueCount === 0) return;
@@ -587,26 +596,18 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     await runRefinement(refineInstruction, true);
   }
 
-  async function handleExplainDependencies() {
-    await runRefinement(
-      'Preserve the epic, issues, estimates, labels, sprint scope, and every existing dependsOn edge exactly. '
-      + 'For each dependency, add or replace dependencyReasons with a concrete explanation in natural workplace language. '
-      + 'Say what specific decision, information, or finished piece of work is needed first, how the later work uses it, '
-      + 'and what would go wrong or need rework if both started independently. Write for product, design, QA, operations, '
-      + 'and engineering; use technical terms only when truly necessary and explain their practical meaning. '
-      + 'Do not say only that one issue must finish before another can start, and do not merely repeat issue titles.',
-    );
-  }
-
+  /** Editing an issue no longer wipes the dependency reasons of everything downstream of it.
+   *
+   *  That used to happen on *every keystroke* in a title or description — this is called per
+   *  character — so fixing one typo in a prerequisite silently emptied the explanation on each
+   *  dependent edge, which the old approval gate then reported as "no clear reason has been provided
+   *  yet" and refused to publish until the reviewer re-ran the whole plan through the AI. The reason
+   *  is supporting context for a suggestion the human is free to dismiss outright, so a stale
+   *  sentence is a far smaller cost than destroying a good one mid-edit. */
   function updateIssue(tempId: string, patch: Partial<IssueDraftDto>) {
-    const prerequisiteMeaningChanged = patch.title !== undefined || patch.description !== undefined;
-    setIssues((prev) => prev.map((issue) => {
-      if (issue.tempId === tempId) return { ...issue, ...patch };
-      if (!prerequisiteMeaningChanged || !issue.dependsOn.includes(tempId)) return issue;
-      const dependencyReasons = { ...(issue.dependencyReasons ?? {}) };
-      delete dependencyReasons[tempId];
-      return { ...issue, dependencyReasons };
-    }));
+    setIssues((prev) => prev.map(
+      (issue) => (issue.tempId === tempId ? { ...issue, ...patch } : issue),
+    ));
   }
 
   function updatePoints(tempId: string, value: string) {
@@ -619,6 +620,22 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
       if (i.tempId !== tempId) return i;
       const has = i.labels.includes(name);
       return { ...i, labels: has ? i.labels.filter((l) => l !== name) : [...i.labels, name] };
+    }));
+  }
+
+  /** A blocking link is the AI's suggestion, so declining one is a single click and needs no reason —
+   *  the reviewer confirms what survives rather than justifying what the model proposed.
+   *
+   *  This demotes the edge to plain ordering rather than deleting it: the reviewer is saying "don't
+   *  claim this card is blocked", not "these two pieces of work are unrelated", and demoting leaves
+   *  the topological order (and so the sprint layout they are looking at) undisturbed. */
+  function removeDependency(issueTempId: string, dependencyTempId: string) {
+    setIssues((prev) => prev.map((issue) => {
+      if (issue.tempId !== issueTempId) return issue;
+      return {
+        ...issue,
+        dependencyKinds: { ...(issue.dependencyKinds ?? {}), [dependencyTempId]: 'after' },
+      };
     }));
   }
 
@@ -912,7 +929,21 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                     {activeBucketCount !== 1 ? 's' : ''}
                   </span>
                 )}
+                {blockingLinkCount > 0 && (
+                  <span>
+                    <strong>{blockingLinkCount}</strong> blocking link
+                    {blockingLinkCount !== 1 ? 's' : ''}
+                  </span>
+                )}
               </div>
+              {/* The type rule used to live only in a hover `title` on the dropdown, which made a
+                  deliberate, consistently-applied choice look arbitrary to anyone reviewing a plan.
+                  It is one quiet line, shown once per plan rather than once per issue. */}
+              <p className="pe-legend">
+                <strong>Story</strong> delivers something a stakeholder outside engineering would
+                recognise as shipped. <strong>Task</strong> is enabling work with no user-visible
+                outcome on its own — data models, wiring, tests. Change either on any issue below.
+              </p>
               {(usage.inputTokens > 0 || usage.outputTokens > 0 || usage.latencySeconds > 0) && (
                 <div className="pe-usage" aria-label="AI planning details">
                   <div className="pe-usage__heading">
@@ -933,24 +964,6 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                     </div>
                     <div><span>AI time</span><strong>{usage.latencySeconds.toFixed(2)}s</strong></div>
                   </div>
-                </div>
-              )}
-              {dependencyReasonGapCount > 0 && (
-                <div className="pe-capacity-warning pe-dependency-warning">
-                  <p>
-                    <strong>{dependencyReasonGapCount} dependency explanation
-                      {dependencyReasonGapCount !== 1 ? 's are' : ' is'} missing or circular.</strong>{' '}
-                    Approval is blocked until each one explains what must be ready first and what
-                    would go wrong or need rework if the team started too soon.
-                  </p>
-                  <button
-                    type="button"
-                    className="bl-btn bl-btn--outline"
-                    onClick={handleExplainDependencies}
-                    disabled={refineLoading}
-                  >
-                    {refineLoading ? 'Writing reasons…' : 'Add clear reasons with AI'}
-                  </button>
                 </div>
               )}
               {layoutRepairNotice && (
@@ -1271,21 +1284,36 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                                 })}
                               </div>
                             )}
-                            {issue.dependsOn.length > 0 && (
+                            {/* Only blocking edges are listed. A Jira issue link has no relation that
+                                means "do this later" — the tracker offers blocks, clones, duplicates
+                                and relates-to and nothing else — so a softer edge shown here would be
+                                a promise the publish step cannot keep. Those edges still order the
+                                plan, and that ordering is already visible and editable as the sprint
+                                each issue sits in. */}
+                            {blockingPrerequisites(issue).length > 0 && (
                               <div className="pe-issue__deps">
-                                <strong>Why this work must wait</strong>
-                                {issue.dependsOn.map((id) => {
+                                <strong>Blocked by</strong>
+                                {blockingPrerequisites(issue).map((id) => {
                                   const prerequisite = issues.find((candidate) => candidate.tempId === id);
                                   const prerequisiteTitle = prerequisite?.title || id;
-                                  const reason = issue.dependencyReasons?.[id];
-                                  const concreteReason = isConcreteDependencyReason(reason) ? reason : '';
+                                  const reason = issue.dependencyReasons?.[id]?.trim();
                                   return (
                                     <div className="pe-issue__dependency" key={id}>
-                                      <span>Blocked by <strong>{prerequisiteTitle}</strong></span>
-                                      <p className={concreteReason ? '' : 'is-missing'}>
-                                        {concreteReason
-                                          || 'No clear reason has been provided yet. Use “Add clear reasons with AI” above.'}
-                                      </p>
+                                      <div className="pe-issue__dependency-head">
+                                        <span><strong>{prerequisiteTitle}</strong></span>
+                                        {stage === 'preview' && (
+                                          <button
+                                            type="button"
+                                            className="pe-dep-remove"
+                                            onClick={() => removeDependency(issue.tempId, id)}
+                                            title="Don't create this blocking link"
+                                            aria-label={`Remove the blocking link on ${prerequisiteTitle}`}
+                                          >
+                                            ×
+                                          </button>
+                                        )}
+                                      </div>
+                                      {reason && <p>{reason}</p>}
                                     </div>
                                   );
                                 })}
@@ -1356,7 +1384,6 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                   || overCapacityBucketCount > 0
                   || duplicateTempIdCount > 0
                   || missingDependencyTargetCount > 0
-                  || dependencyReasonGapCount > 0
                   || requiresExtraSprintAcceptance
                   || sprintNameError != null
                   || staleSprintTargetError != null
@@ -1381,9 +1408,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                                 ? 'Estimate every issue before creating so sprint capacity is reliable'
                                 : requiresExtraSprintAcceptance
                                   ? 'Accept the additional sprint buckets or revise the plan first'
-                                  : dependencyReasonGapCount > 0
-                                    ? 'Explain every dependency concretely before creating'
-                                    : staleSprintTargetError ?? sprintNameError ?? undefined
+                                  : staleSprintTargetError ?? sprintNameError ?? undefined
                 }
               >
                 Approve &amp; create epic + {issues.length} issue{issues.length !== 1 ? 's' : ''}

@@ -73,6 +73,8 @@ export interface DraftTaskResponse {
   latencySeconds: number;
 }
 
+export type DependencyKind = 'blocks' | 'after';
+
 export interface EpicDraftDto {
   title: string;
   description: string;
@@ -88,6 +90,9 @@ export interface IssueDraftDto {
   estimateStoryPoints: number | null;
   estimateRationale: string | null;
   dependsOn: string[];
+  /** Per-dependency strength. 'blocks' publishes a real Jira "is blocked by" link; 'after' is a
+   *  sequencing preference that only affects sprint order. Absent entries mean 'after'. */
+  dependencyKinds?: Record<string, DependencyKind>;
   dependencyReasons?: Record<string, string>;
 }
 

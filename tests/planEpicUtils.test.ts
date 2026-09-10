@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   hasCompleteBucketLayout,
-  isConcreteDependencyReason,
   isValidStoryPoint,
   MAX_SPRINT_NAME_LENGTH,
   needsExtraSprintAcceptance,
@@ -69,58 +68,4 @@ test('generated sprint names stay within Jira\'s 100-character limit including u
   assert.equal(Array.from(second).length, MAX_SPRINT_NAME_LENGTH);
   assert.match(second, / \(2\)$/);
   assert.notEqual(first, second);
-});
-
-test('circular dependency wording is rejected but a concrete consequence is accepted', () => {
-  const circularReasons = [
-    'This issue needs the completed output of “Define access rules” before work can begin.',
-    'Work cannot begin until the dependency is complete.',
-    'This work has to wait for Define access rules to finish.',
-    'Issue 2 depends on Issue 1, so Issue 1 must be done first.',
-    'The prerequisite needs to be completed before this work can proceed.',
-    'We need to wait for the access rules because they have to be ready first.',
-  ];
-  circularReasons.forEach((reason) => assert.equal(isConcreteDependencyReason(reason), false, reason));
-  assert.equal(
-    isConcreteDependencyReason(
-      'The team needs the approved permission rules first; starting earlier could expose vendor data to the wrong roles and require the export flow to be rewritten.',
-    ),
-    true,
-  );
-  assert.equal(
-    isConcreteDependencyReason(
-      'UI tests need the completed status and download interfaces to verify loading, progress, failure, and success behavior.',
-    ),
-    true,
-  );
-  assert.equal(
-    isConcreteDependencyReason(
-      'End-to-end tests need the implemented worker behavior so they can verify real state transitions rather than placeholders.',
-    ),
-    true,
-  );
-  assert.equal(
-    isConcreteDependencyReason(
-      'The job needs the approved permission scope before it reads records; starting first could allow unauthorized data into generated files or require reworking the contract.',
-    ),
-    true,
-  );
-  assert.equal(
-    isConcreteDependencyReason(
-      'The download flow needs the job output contract so it knows which file metadata to expose; starting earlier risks mismatched job and file states.',
-    ),
-    true,
-  );
-  assert.equal(
-    isConcreteDependencyReason(
-      'Storage needs the job completion state and output contract so files are saved only after successful generation and linked to the correct export.',
-    ),
-    true,
-  );
-  assert.equal(
-    isConcreteDependencyReason(
-      'The interface needs the final job states to display meaningful status instead of inventing client-side assumptions.',
-    ),
-    true,
-  );
 });

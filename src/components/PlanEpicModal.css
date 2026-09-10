@@ -215,17 +215,6 @@
   flex: none;
 }
 
-.pe-dependency-warning {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.pe-dependency-warning p {
-  flex: 1;
-  margin: 0;
-}
-
 .pe-summary {
   display: flex;
   gap: 1.25rem;
@@ -583,6 +572,18 @@
   color: #475569;
 }
 
+.pe-legend {
+  margin: 0.35rem 0 0;
+  padding: 0 0.15rem;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.pe-legend strong {
+  color: #475569;
+}
+
 .pe-issue__dependency {
   display: flex;
   flex-direction: column;
@@ -595,9 +596,27 @@
   color: #334155;
 }
 
-.pe-issue__dependency p.is-missing {
-  color: #b45309;
-  font-style: italic;
+.pe-issue__dependency-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* A blocking link is a suggestion, so declining it stays quiet until hovered rather than shouting for
+   attention the way the old "explanation missing" warning did. */
+.pe-dep-remove {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  cursor: pointer;
+}
+
+.pe-dep-remove:hover {
+  color: #dc2626;
 }
 
 @media (max-width: 700px) {
