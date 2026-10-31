@@ -6,6 +6,7 @@ import { aiApi } from '../api';
 import type { AskResponseDto, ChatTurnDto, ClarificationOptionDto } from '../api';
 import { IssueKeyChip } from './IssueKeyChip';
 import { AiUsageCard } from './AiUsageCard';
+import { AnswerFeedback } from './AnswerFeedback';
 import { formatDuration } from '../utils/formatDuration';
 import './AskAiPanel.css';
 
@@ -424,6 +425,9 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                               {turn.result.answer}
                             </ReactMarkdown>
                           </div>
+                        )}
+                        {turn.result.feedbackReceipt && !turn.abandoned && !turn.result.needsClarification && (
+                          <AnswerFeedback receipt={turn.result.feedbackReceipt} />
                         )}
                         {turn.result.citations.length > 0 && (
                           // <details> gives collapse/expand for free — no state, no JS, keyboard/

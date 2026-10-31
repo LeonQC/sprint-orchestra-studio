@@ -1,4 +1,4 @@
-import { Outlet, NavLink, Link } from 'react-router-dom';
+import { Outlet, NavLink, Link, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
 import { useSpaces } from '../context/SpaceContext';
@@ -14,16 +14,17 @@ const TABS = [
 
 export function JiraLayout() {
   const { currentSpace } = useSpaces();
+  const isFeedback = useLocation().pathname === '/ai-feedback';
 
   return (
-    <div className="jira-layout">
+    <div className={`jira-layout${isFeedback ? ' jira-layout--feedback' : ''}`}>
       {/* TopNav uses a Fragment; wrap so it does not sit in the same flex row as Sidebar + main */}
       <div className="jira-layout__top">
         <TopNav />
       </div>
       <Sidebar />
       <main className="jira-main">
-        <Link to="/spaces" className="jira-project-header">
+        {!isFeedback && <><Link to="/spaces" className="jira-project-header">
           <span
             className="jira-project-dot"
             style={{ background: currentSpace.color }}
@@ -42,7 +43,7 @@ export function JiraLayout() {
               {label}
             </NavLink>
           ))}
-        </nav>
+        </nav></>}
         <Outlet />
       </main>
     </div>

@@ -11,6 +11,7 @@ import { TicketDetail } from './pages/TicketDetail';
 import { SpaceOverview } from './pages/SpaceOverview';
 import { SpacesList } from './pages/SpacesList';
 import { Groups } from './pages/Groups';
+import { AiFeedback } from './pages/AiFeedback';
 import { Login } from './pages/Login';
 import { OAuthCallback } from './pages/OAuthCallback';
 import { RequireAuth } from './components/RequireAuth';
@@ -44,6 +45,7 @@ function App() {
                 <Route index element={<Navigate to="/spaces" replace />} />
                 <Route path="spaces" element={<SpacesList />} />
               <Route path="groups" element={<Groups />} />
+                <Route path="ai-feedback" element={<AiFeedback />} />
                 <Route path="space" element={<SpaceOverview />} />
                 <Route path="board" element={<Board />} />
                 <Route path="summary" element={<Summary />} />

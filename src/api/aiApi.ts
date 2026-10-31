@@ -160,6 +160,8 @@ export interface ClarificationOptionDto {
 }
 
 export interface AskResponseDto {
+  answerId?: string | null;
+  feedbackReceipt?: string | null;
   answer: string;
   abstained: boolean;
   /** True when `answer` is a clarification QUESTION, not a completed answer — the agent found
