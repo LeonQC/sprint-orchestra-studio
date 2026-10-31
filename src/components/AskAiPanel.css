@@ -808,12 +808,29 @@
 
 /* The answer as it streams in, before the real (citations-and-all) turn replaces it on `result`.
    Piggybacks on .aa-answer for markdown styling — see the .tsx note on why the preview is rendered
-   as markdown now — and is held one shade lighter so it still reads as a preview, not the final
-   answer. */
+   as markdown now. A shade-lighter text color used to be the only "this is a draft" cue, and it
+   wasn't enough: once formatted (bold/bullets/citations), a streamed answer reads as finished well
+   before verification actually finishes, and the label above it is easy to miss by then. Opacity +
+   a dashed indigo rule + the tag below make "not final yet" legible on the block itself, at any
+   scroll position, for as long as verification is running. */
 .aa-streaming-preview {
-  margin: 0.1rem 0 0;
-  padding: 0 0.2rem;
-  color: #334155;
+  margin: 0.35rem 0 0;
+  padding: 0.1rem 0 0.1rem 0.6rem;
+  border-left: 2px dashed #a5b4fc;
+  opacity: 0.72;
+}
+
+/* Sits on the draft block itself (see the .tsx note) rather than only in the stage label above it.
+   Indigo, not the cache badge's emerald: indigo already means "AI is doing work" throughout this
+   panel (header badge, answer avatar, .aa-loading__dot) — this is that same work, not finished. */
+.aa-streaming-preview__tag {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #4338ca;
 }
 
 /* "Served from the answer cache" marker on a single turn.

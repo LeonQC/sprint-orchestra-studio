@@ -528,11 +528,18 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                     it grows so the reader never sees raw "**" / "- " mid-stream. react-markdown
                     tolerates unclosed syntax — a trailing "**" shows literally until its partner
                     arrives, then reflows. The completed turn below still replaces this wholesale the
-                    instant `result` lands (citations, and any verification rewrite). The "verifying
-                    and finalizing…" stage label + loading dots above carry the "still working" cue
-                    during the post-stream verification pause. */}
+                    instant `result` lands (citations, and any verification rewrite).
+                    The tag + dashed rule + opacity below are the "still a draft" cue that lives ON
+                    the block itself, not just in the stage label above it — a fully-formatted
+                    markdown answer (bold, bullets, citations) reads as finished the moment it's done
+                    streaming, well before verification (which can rewrite it) actually completes, so
+                    the "verifying and finalizing…" line above can no longer be the only signal that
+                    what's on screen is provisional. Found live: a multi-second verification pause
+                    left a complete-looking, citation-bearing answer on screen with only a small,
+                    easy-to-miss label above it claiming otherwise. */}
                 {streamingText && (
                   <div className="aa-answer aa-streaming-preview">
+                    <span className="aa-streaming-preview__tag">Draft · verifying</span>
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
                   </div>
                 )}
