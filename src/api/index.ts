@@ -36,6 +36,7 @@ export type {
   IssueDraftDto,
   SprintBucketDto,
   PlanEpicResponse,
+  ChangeSummaryDto,
   CitationDto,
   ChatTurnDto,
   AskResponseDto,

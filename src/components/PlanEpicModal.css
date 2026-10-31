@@ -313,6 +313,66 @@
   line-height: 1.4;
 }
 
+/* The log of what each Apply actually did — see RefineHistoryPanel. Sits below the instruction box,
+   oldest round first, so it reads as a running receipt rather than a result that gets replaced. */
+.pe-refine-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.pe-refine-history__round {
+  padding: 0.5rem 0.65rem;
+  background: #ffffff;
+  border: 1px solid #e7e5e4;
+  border-radius: 6px;
+}
+
+.pe-refine-history__instruction {
+  margin: 0 0 0.3rem;
+  font-size: 0.72rem;
+  color: #44403c;
+  font-style: italic;
+}
+
+.pe-refine-history__round-label {
+  font-style: normal;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.62rem;
+  color: #78716c;
+  margin-right: 0.4rem;
+}
+
+.pe-refine-history__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pe-refine-history__line {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #57534e;
+}
+
+.pe-refine-history__line--added {
+  color: #166534;
+}
+
+.pe-refine-history__line--removed {
+  color: #991b1b;
+}
+
+.pe-refine-history__line--muted {
+  color: #a8a29e;
+}
+
 .pe-bucket {
   border: 2px solid #c7d2fe;
   border-radius: 12px;
@@ -505,6 +565,55 @@
   font-style: italic;
 }
 
+/* One line of provenance under the estimate rationale: which past issues the number came from, how
+   it compared, and how much of it rests on finished work. Deliberately quieter than the rationale
+   above it — this is evidence a reviewer can follow up, not something to read on every card. */
+.pe-issue__provenance {
+  margin: 0.15rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  color: #64748b;
+}
+
+.pe-issue__provenance-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.62rem;
+  color: #94a3b8;
+}
+
+.pe-issue__provenance-note {
+  color: #64748b;
+}
+
+.pe-issue__confidence {
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+/* Three tints rather than one: "low confidence" is the common, correct outcome for work with no
+   precedent, so it must not look like an error — grey, not red. */
+.pe-issue__confidence--high {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pe-issue__confidence--medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.pe-issue__confidence--low {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
 .pe-issue__meta {
   display: flex;
   gap: 0.4rem;
@@ -640,4 +749,118 @@
 
 .pe-add-issue:hover {
   background: #eef2ff;
+}
+
+/* Description shown the way it will look on the board, with the markup one click away. The rendered
+   view has to reproduce the ticket view's own spacing closely enough that "this is what publishing
+   gets you" is true — a preview that looks different from the result is worse than no preview. */
+.pe-desc {
+  position: relative;
+}
+
+.pe-desc__toggle {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.3rem;
+  z-index: 1;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 0.62rem;
+  cursor: pointer;
+}
+
+.pe-desc__toggle:hover {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.pe-desc__rendered {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #1e293b;
+}
+
+/* The generated layout is h3 sections with short paragraphs and a criteria list; without these the
+   browser's default h3 margins make a five-section description twice as tall as the card. */
+.pe-desc__rendered h3 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+.pe-desc__rendered h3:first-child {
+  margin-top: 0;
+}
+
+.pe-desc__rendered p {
+  margin: 0 0 0.3rem;
+}
+
+.pe-desc__rendered ul {
+  margin: 0 0 0.3rem;
+  padding-left: 1.1rem;
+}
+
+.pe-desc__rendered li {
+  margin-bottom: 0.15rem;
+}
+
+.pe-desc__rendered strong {
+  color: #334155;
+}
+
+/* Live progress while the plan is generated. Sits where the error message would, so the modal does
+   not jump when one replaces the other. */
+.pe-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #e0e7ff;
+  border-radius: 6px;
+  background: #f5f7ff;
+  font-size: 0.78rem;
+  color: #4338ca;
+}
+
+.pe-progress__spinner {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex: none;
+  border: 2px solid #c7d2fe;
+  border-top-color: #4338ca;
+  border-radius: 50%;
+  animation: pe-progress-spin 0.7s linear infinite;
+}
+
+.pe-progress__label {
+  flex: 1;
+}
+
+/* Tabular figures so the seconds do not shuffle the label sideways every tick. */
+.pe-progress__elapsed {
+  font-variant-numeric: tabular-nums;
+  color: #6366f1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pe-progress__spinner {
+    animation: none;
+  }
+}
+
+@keyframes pe-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

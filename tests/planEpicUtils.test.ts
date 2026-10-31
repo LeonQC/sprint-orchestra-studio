@@ -9,6 +9,7 @@ import {
   normalizeSprintNameInput,
   normalizedSprintName,
   uniqueSprintName,
+  parsedRequirements,
 } from '../src/components/planEpicUtils.ts';
 
 test('long sprint names remain intact while pasted line breaks become spaces', () => {
@@ -68,4 +69,28 @@ test('generated sprint names stay within Jira\'s 100-character limit including u
   assert.equal(Array.from(second).length, MAX_SPRINT_NAME_LENGTH);
   assert.match(second, / \(2\)$/);
   assert.notEqual(first, second);
+});
+
+test('parsedRequirements: one requirement per line, list markers stripped', () => {
+  // People paste bullets out of a doc or a ticket, and the marker comes with them. Keeping it would
+  // put a bullet character into the retrieval query, where it is noise the embedding averages away.
+  assert.deepEqual(
+    parsedRequirements('- Upload a spreadsheet\n* Validate every row\n1. Restrict to admins'),
+    ['Upload a spreadsheet', 'Validate every row', 'Restrict to admins'],
+  );
+  assert.deepEqual(parsedRequirements('• Bullet char too'), ['Bullet char too']);
+});
+
+test('parsedRequirements: blank lines are dropped, not sent as empty requirements', () => {
+  // The server would ignore them, but they would throw off the 1-based numbering the plan cites back.
+  assert.deepEqual(parsedRequirements('One\n\n   \nTwo\n'), ['One', 'Two']);
+  assert.deepEqual(parsedRequirements(''), []);
+  assert.deepEqual(parsedRequirements('   \n  '), []);
+});
+
+test('parsedRequirements: a hyphen inside the text survives', () => {
+  assert.deepEqual(
+    parsedRequirements('Support multi-currency pricing - including refunds'),
+    ['Support multi-currency pricing - including refunds'],
+  );
 });

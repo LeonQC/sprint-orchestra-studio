@@ -65,3 +65,17 @@ export function nextManualTempId(existingTempIds: Iterable<string>, currentCount
   } while (existing.has(tempId));
   return { tempId, counter };
 }
+
+/** Requirement bullets from free text: one per line, leading list markers stripped.
+ *
+ *  Tolerant on purpose. People paste from a doc or a ticket and the leading "- ", "* " or "1. " comes
+ *  with them; keeping those would put them into the retrieval query, where a bullet character is
+ *  noise the embedding has to average away. Blank lines are dropped rather than sent as empty
+ *  requirements, which the server would ignore anyway but which would throw the 1-based numbering the
+ *  plan cites back off by one. */
+export function parsedRequirements(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, '').trim())
+    .filter((line) => line.length > 0);
+}

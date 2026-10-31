@@ -4,6 +4,7 @@ import type { Sprint } from '../types/sprint';
 import { labelColor } from '../types/ticket';
 import { aiApi, labelApi } from '../api';
 import type {
+  ChangeSummaryDto,
   IssueDraftDto,
   LabelDto,
   PlanEpicResponse,
@@ -18,7 +19,9 @@ import {
   normalizeSprintNameInput,
   normalizedSprintName,
   uniqueSprintName,
+  parsedRequirements,
 } from './planEpicUtils';
+import { IssueKeyChip } from './IssueKeyChip';
 import './PlanEpicModal.css';
 
 type Stage = 'input' | 'preview' | 'committing' | 'error';
@@ -130,9 +133,196 @@ interface PlanEpicModalProps {
   onClose: () => void;
 }
 
+/** What the server is doing and for how long. Generating takes up to a minute, and the old button
+ *  label sat unchanged for the ~30s the model writes, which looked hung. A ticking counter shows it's
+ *  alive; no progress bar, since the server can't say how far along it is. */
+function GenerationProgress({ label }: { label: string | null }) {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      setSeconds(Math.round((Date.now() - started) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="pe-progress" role="status" aria-live="polite">
+      <span className="pe-progress__spinner" aria-hidden />
+      <span className="pe-progress__label">{label ?? 'Starting…'}</span>
+      <span className="pe-progress__elapsed">{seconds}s</span>
+    </div>
+  );
+}
+
+const LOOKS_LIKE_MARKUP = /<(h[1-6]|p|ul|ol|li|strong|em|br)\b/i;
+
+/** Description field showing what will actually be published, with the raw HTML one click away.
+ *  Descriptions are HTML (the board's layout), and showing `<h3>Context</h3>…` in a textarea made the
+ *  review screen unreadable. Formatted by default; the raw view is the existing textarea (no rich-text
+ *  editor, whose caret would jump on re-render). Plain-text descriptions just get the textarea. */
+function DescriptionField({
+  value,
+  placeholder,
+  disabled,
+  onChange,
+  className = 'bl-modal__input pe-issue__desc',
+}: {
+  value: string;
+  placeholder: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+  className?: string;
+}) {
+  const [showSource, setShowSource] = useState(false);
+  const isMarkup = LOOKS_LIKE_MARKUP.test(value);
+
+  if (!isMarkup) {
+    return (
+      <AutoGrowTextarea
+        className={className}
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+
+  return (
+    <div className="pe-desc">
+      <button
+        type="button"
+        className="pe-desc__toggle"
+        onClick={() => setShowSource((current) => !current)}
+        title={showSource ? 'Show it the way it will look on the board' : 'Edit the underlying markup'}
+      >
+        {showSource ? 'Preview' : 'Edit markup'}
+      </button>
+      {showSource ? (
+        <AutoGrowTextarea
+          className={className}
+          value={value}
+          placeholder={placeholder}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          autoFocus
+        />
+      ) : (
+        <div className="pe-desc__rendered" dangerouslySetInnerHTML={{ __html: value }} />
+      )}
+    </div>
+  );
+}
+
+/** Where a planned issue came from, in one line. `estimateReference` keys are verified server-side
+ *  (made-up keys are removed), so each chip opens a real issue to check. Renders nothing when there's
+ *  no history to cite — a normal outcome. */
+function IssueProvenance({ issue }: { issue: IssueDraftDto }) {
+  const references = issue.estimateReference ?? [];
+  const patterns = issue.patternBasis ?? [];
+  if (references.length === 0 && patterns.length === 0) return null;
+
+  // Only meaningful alongside a reference — confidence in an estimate that cited nothing is always
+  // "low" by construction, and printing it there would read as a warning about the plan rather than
+  // as the absence of a comparison.
+  const confidence = references.length > 0 ? issue.estimateConfidence : undefined;
+  const comparison = issue.complexityVsReference?.replace('_', ' ');
+
+  return (
+    <p className="pe-issue__provenance">
+      {references.length > 0 && (
+        <>
+          <span className="pe-issue__provenance-label">Sized against</span>
+          {references.map((key) => (
+            <IssueKeyChip key={key} issueKey={key} size="sm" />
+          ))}
+          {comparison && issue.historicalBaselinePoints != null && (
+            <span
+              className="pe-issue__provenance-note"
+              title={`Those issues really took ${issue.historicalBaselinePoints} points; this work was judged ${comparison}.`}
+            >
+              {issue.historicalBaselinePoints} pts, {comparison}
+            </span>
+          )}
+          {confidence && (
+            <span className={`pe-issue__confidence pe-issue__confidence--${confidence}`}>
+              {confidence} confidence
+            </span>
+          )}
+        </>
+      )}
+      {patterns.length > 0 && (
+        <span className="pe-issue__provenance-note" title={patterns.join(' · ')}>
+          from past practice: {patterns.join(' · ')}
+        </span>
+      )}
+    </p>
+  );
+}
+
+/** A log of what each Apply actually did, oldest round first, so a reviewer about to type a third
+ *  instruction can see what the first two already accomplished instead of re-reading every card.
+ *  Every line here is `ChangeSummaryDto` — a server-side diff of the plan before/after that round,
+ *  never the model's own account of itself. */
+function RefineHistoryPanel({ history }: { history: ChangeSummaryDto[] }) {
+  if (history.length === 0) return null;
+  return (
+    <div className="pe-refine-history">
+      {history.map((round, index) => {
+        const nothingChanged = round.added.length === 0 && round.removed.length === 0
+          && round.retitled.length === 0 && round.reEstimated.length === 0;
+        return (
+          // Rounds are append-only and never reordered, so an index is a stable key here.
+          <div className="pe-refine-history__round" key={index}>
+            <p className="pe-refine-history__instruction">
+              <span className="pe-refine-history__round-label">Round {index + 1}</span>
+              “{round.instruction}”
+            </p>
+            {nothingChanged ? (
+              <p className="pe-refine-history__line pe-refine-history__line--muted">No cards changed.</p>
+            ) : (
+              <ul className="pe-refine-history__list">
+                {round.added.map((title) => (
+                  <li key={`add-${title}`} className="pe-refine-history__line pe-refine-history__line--added">
+                    + added “{title}”
+                  </li>
+                ))}
+                {round.removed.map((title) => (
+                  <li key={`rm-${title}`} className="pe-refine-history__line pe-refine-history__line--removed">
+                    − removed “{title}”
+                  </li>
+                ))}
+                {round.retitled.map((line) => (
+                  <li key={`rt-${line}`} className="pe-refine-history__line">renamed {line}</li>
+                ))}
+                {round.reEstimated.map((line) => (
+                  <li key={`est-${line}`} className="pe-refine-history__line">re-estimated {line}</li>
+                ))}
+              </ul>
+            )}
+            {round.unchangedCount > 0 && (
+              <p className="pe-refine-history__line pe-refine-history__line--muted">
+                {round.unchangedCount} other card{round.unchangedCount !== 1 ? 's' : ''} left unchanged.
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEpicModalProps) {
   const [stage, setStage] = useState<Stage>('input');
   const [proposal, setProposal] = useState('');
+  /** One requirement per line. An epic title is a direction; these are the pieces it has to deliver,
+   *  and each one is searched for separately server-side — so an issue written for a requirement is
+   *  sized against the past work resembling THAT piece rather than the epic as a whole. Kept as raw
+   *  text rather than a list of inputs: people paste bullets from a doc, and a row-per-requirement
+   *  widget makes that the one thing you cannot do. */
+  const [requirementsText, setRequirementsText] = useState('');
   const [spaceLabels, setSpaceLabels] = useState<LabelDto[]>([]);
   const [capacityInput, setCapacityInput] = useState('');
   const [targetSprintCountInput, setTargetSprintCountInput] = useState('');
@@ -163,6 +353,13 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
   const [refineInstruction, setRefineInstruction] = useState('');
   const [refineLoading, setRefineLoading] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
+  const [refineStage, setRefineStage] = useState<string | null>(null);
+  /** One entry per Apply so far, oldest first — the server-computed diff for that round, not the
+   *  model's word for it (see `ChangeSummaryDto`). Kept so a reviewer writing a third instruction can
+   *  see what the first two actually did without re-reading every card. Reset when a fresh plan is
+   *  generated; a resumed/restored draft starts with none of its own history either, since only the
+   *  plan state itself is persisted. */
+  const [refineHistory, setRefineHistory] = useState<ChangeSummaryDto[]>([]);
 
   const [commitError, setCommitError] = useState<string | null>(null);
   const [commitProgress, setCommitProgress] = useState<{ created: number; total: number } | null>(null);
@@ -358,6 +555,11 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
   ) {
     setLayoutRepairNotice(null);
     setAcceptedExtraSprints(false);
+    // Only refine responses carry one (plan_epic has no "before" to diff against) — append rather
+    // than replace, so the panel below the instruction box reads as a log of the round so far.
+    if (response.changeSummary) {
+      setRefineHistory((prev) => [...prev, response.changeSummary!]);
+    }
     setEpicTitle(response.epic.title);
     setEpicDescription(response.epic.description);
     setEpicGoals(response.epic.goals ?? []);
@@ -523,6 +725,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     setGenLoading(true);
     setGenError(null);
     setStageLabel(null);
+    setRefineHistory([]);
     try {
       const capacity = capacityInput.trim() ? Number(capacityInput) : autoCapacity;
       const targetCount = targetSprintCountInput.trim() ? Number(targetSprintCountInput) : NaN;
@@ -539,6 +742,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
       const workflow = await aiApi.startRolloutStream(
         proposal.trim(),
         spaceId,
+        parsedRequirements(requirementsText),
         spaceLabels.map((l) => l.name),
         resolvedCapacity,
         resolvedTargetCount,
@@ -575,16 +779,22 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     setRefineLoading(true);
     setRefineError(null);
     try {
-      const response = await aiApi.refinePlan(
+      const response = await aiApi.refinePlanStream(
         { title: epicTitle, description: epicDescription, goals: epicGoals },
         issues,
         instruction.trim(),
         spaceLabels.map((l) => l.name),
         lastCapacity,
         lastTargetSprintCount,
+        spaceId,
+        parsedRequirements(requirementsText),
+        setRefineStage,
       );
       applyPlanResponse(response, [], 'add', bucketChoices);
       if (clearManualInput) setRefineInstruction('');
+      // Cleared on success so the next Apply starts from "Starting…" rather than flashing the
+      // previous round's last label before the first event of the new one arrives.
+      setRefineStage(null);
     } catch (err) {
       setRefineError(err instanceof Error ? err.message : 'Refine failed — try again.');
     } finally {
@@ -596,14 +806,9 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     await runRefinement(refineInstruction, true);
   }
 
-  /** Editing an issue no longer wipes the dependency reasons of everything downstream of it.
-   *
-   *  That used to happen on *every keystroke* in a title or description — this is called per
-   *  character — so fixing one typo in a prerequisite silently emptied the explanation on each
-   *  dependent edge, which the old approval gate then reported as "no clear reason has been provided
-   *  yet" and refused to publish until the reviewer re-ran the whole plan through the AI. The reason
-   *  is supporting context for a suggestion the human is free to dismiss outright, so a stale
-   *  sentence is a far smaller cost than destroying a good one mid-edit. */
+  /** Editing an issue no longer wipes its dependents' dependency reasons. This runs on every keystroke,
+   *  so fixing one typo used to empty every downstream explanation. A slightly stale reason is far
+   *  cheaper than losing a good one. */
   function updateIssue(tempId: string, patch: Partial<IssueDraftDto>) {
     setIssues((prev) => prev.map(
       (issue) => (issue.tempId === tempId ? { ...issue, ...patch } : issue),
@@ -726,7 +931,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
     return false;
   }
 
-  function finalEditedPlan() {
+function finalEditedPlan() {
     return {
       epic: { title: epicTitle.trim(), description: epicDescription.trim(), goals: epicGoals },
       issues,
@@ -834,6 +1039,17 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                 onChange={(e) => setProposal(e.target.value)}
                 autoFocus
               />
+              <label className="bl-modal__label" htmlFor="pe-requirements">
+                Requirements <span className="pe-label-hint">one per line — optional, but this is what
+                gets matched against past work</span>
+              </label>
+              <AutoGrowTextarea
+                id="pe-requirements"
+                className="bl-modal__input pe-textarea"
+                placeholder={'e.g.\nAn admin uploads a spreadsheet and the import runs in the background\nEvery row is validated before anything is created, and bad rows are reported\nOnly authorized admins can start an import'}
+                value={requirementsText}
+                onChange={(e) => setRequirementsText(e.target.value)}
+              />
               <div className="pe-row">
                 <div className="pe-field">
                   <label className="bl-modal__label" htmlFor="pe-capacity">Capacity per sprint (points)</label>
@@ -865,6 +1081,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                   />
                 </div>
               </div>
+              {genLoading && <GenerationProgress label={stageLabel} />}
               {genError && <p className="pe-error">{genError}</p>}
             </>
           )}
@@ -873,8 +1090,8 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
             <>
               {degraded && (
                 <p className="pe-hint pe-hint--warn">
-                  AI planning was unavailable — this is an unassisted single-issue starting point, not
-                  a real decomposition. Review carefully, or close and try again.
+                  The AI's review of this plan didn't finish, so it wasn't double-checked. Review it
+                  carefully before publishing.
                 </p>
               )}
               {stage === 'preview' && (
@@ -901,12 +1118,12 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
               </div>
               <div className="pe-field">
                 <label className="bl-modal__label" htmlFor="pe-epic-desc">Epic description</label>
-                <AutoGrowTextarea
-                  id="pe-epic-desc"
-                  className="bl-modal__input pe-textarea"
+                <DescriptionField
                   value={epicDescription}
+                  placeholder="What this epic delivers, who it is for, and the boundaries"
                   disabled={stage !== 'preview'}
-                  onChange={(e) => setEpicDescription(e.target.value)}
+                  onChange={setEpicDescription}
+                  className="bl-modal__input pe-textarea"
                 />
               </div>
 
@@ -1069,7 +1286,9 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                       {refineLoading ? 'Applying…' : 'Apply'}
                     </button>
                   </div>
+                  {refineLoading && <GenerationProgress label={refineStage} />}
                   {refineError && <p className="pe-error">{refineError}</p>}
+                  <RefineHistoryPanel history={refineHistory} />
                 </div>
               )}
 
@@ -1206,12 +1425,11 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                               disabled={stage !== 'preview'}
                               onChange={(e) => updateIssue(issue.tempId, { title: e.target.value })}
                             />
-                            <AutoGrowTextarea
-                              className="bl-modal__input pe-issue__desc"
+                            <DescriptionField
                               value={issue.description}
                               placeholder="Description — what needs to be done and why"
                               disabled={stage !== 'preview'}
-                              onChange={(e) => updateIssue(issue.tempId, { description: e.target.value })}
+                              onChange={(next) => updateIssue(issue.tempId, { description: next })}
                             />
                             <div className="pe-issue__meta">
                               <select
@@ -1266,6 +1484,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                             {issue.estimateStoryPoints != null && issue.estimateRationale && (
                               <p className="pe-issue__rationale">Why {issue.estimateStoryPoints} pts: {issue.estimateRationale}</p>
                             )}
+                            <IssueProvenance issue={issue} />
                             {labelPickerFor === issue.tempId && (
                               <div className="pe-issue__labels pe-issue__labels--picker">
                                 {unusedLabels.map((label) => {
@@ -1352,7 +1571,7 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
                 onClick={handleGenerate}
                 disabled={!proposal.trim() || genLoading}
               >
-                {genLoading ? (stageLabel ?? 'Generating…') : 'Generate plan'}
+                {genLoading ? 'Generating…' : 'Generate plan'}
               </button>
             </>
           )}

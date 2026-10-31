@@ -86,6 +86,22 @@ export interface IssueDraftDto {
   labels: string[];
   estimateStoryPoints: number | null;
   estimateRationale: string | null;
+  /** Past issue keys this estimate was sized against. Verified server-side against the issues the
+   *  planner was actually shown, so every key here opens a real issue — a fabricated one is stripped
+   *  before the response is built. Empty is normal and means the estimate was a judgement call. */
+  estimateReference?: string[];
+  /** Whether the new work is smaller/same/larger than `estimateReference`. The only estimate
+   *  judgement the model makes: the number itself is derived from what those issues really cost. */
+  complexityVsReference?: 'simpler' | 'similar' | 'more_complex' | null;
+  /** Median real story points of the cited issues, before the one-rung adjustment. */
+  historicalBaselinePoints?: number | null;
+  /** Computed from whether this estimate rests on finished work — never claimed by the model. */
+  estimateConfidence?: 'high' | 'medium' | 'low';
+  /** Why the issue exists: asked for by the epic, implied by a historical pattern, or needed to
+   *  deliver the work at all. */
+  origin?: 'epic_requirement' | 'historical_pattern' | 'planning_necessity';
+  /** Names of the historical patterns that led to this issue. Empty for most issues. */
+  patternBasis?: string[];
   dependsOn: string[];
   /** Per-dependency strength. 'blocks' publishes a real Jira "is blocked by" link; 'after' is a
    *  sequencing preference that only affects sprint order. Absent entries mean 'after'. */
@@ -99,10 +115,30 @@ export interface SprintBucketDto {
   totalPoints: number;
 }
 
+/** What one refine round actually did to the plan, computed server-side by diffing it against what it
+ *  was going in — not asserted by the model (see ai-service's `ChangeSummaryOut`). `undefined` on the
+ *  response from `POST /plan-epic` itself, which has no "before" to diff against; only a refine
+ *  produces one. */
+export interface ChangeSummaryDto {
+  instruction: string;
+  /** Titles of issues this round added. */
+  added: string[];
+  /** Titles of issues this round removed (dropped, or folded into a merge target). */
+  removed: string[];
+  /** "New title (was: Old title)", for issues that survived but were renamed. */
+  retitled: string[];
+  /** "Title: 3 -> 5 pts", for issues that survived with a different estimate. */
+  reEstimated: string[];
+  /** Issues matched before/after whose title and points both stayed the same. */
+  unchangedCount: number;
+}
+
 export interface PlanEpicResponse {
   epic: EpicDraftDto;
   issues: IssueDraftDto[];
   sprintPlan: SprintBucketDto[];
+  /** Set only by a refine — see `ChangeSummaryDto`. Optional so an older backend still parses. */
+  changeSummary?: ChangeSummaryDto;
   degraded: boolean;
   latencySeconds: number;
   inputTokens: number;
@@ -559,59 +595,39 @@ export const aiApi = {
       description,
       existing_labels: existingLabels,
     }),
-  planEpic: (
-    proposal: string,
-    existingLabels: string[],
-    sprintCapacityPoints: number | null,
-    targetSprintCount: number | null,
-  ) =>
-    api.post<PlanEpicResponse>('/api/ai/plan-epic', {
-      proposal,
-      existing_labels: existingLabels,
-      sprint_capacity_points: sprintCapacityPoints ?? undefined,
-      target_sprint_count: targetSprintCount ?? undefined,
-    }),
-  /** Applies a free-text edit ("add a QA task", "drop the inventory issue") to a plan already
-   *  returned by planEpic (or a previous refinePlan call) — never persists anything, same as planEpic. */
-  refinePlan: (
+  /** SSE version of `POST /plan-epic/refine` — same pipeline, with its stages reported as they happen.
+   *
+   *  A refine that adds work runs a reading pass, a search per new piece, a pass over the history and
+   *  then the editing call: tens of seconds during which Apply would otherwise just spin. It also
+   *  makes the cheap path legible — an instruction that only re-estimates or merges skips the history
+   *  and says so, which is more useful to show than a shorter unexplained wait. */
+  refinePlanStream: (
     epic: EpicDraftDto,
     issues: IssueDraftDto[],
     instruction: string,
     existingLabels: string[],
     sprintCapacityPoints: number | null,
     targetSprintCount: number | null,
+    spaceId?: number,
+    requirements: string[] = [],
+    onStage?: (label: string) => void,
   ) =>
-    api.post<PlanEpicResponse>('/api/ai/plan-epic/refine', {
+    consumeStageStream<PlanEpicResponse>('/api/ai/plan-epic/refine/stream', {
       epic,
       issues,
       instruction,
+      space_id: spaceId,
+      requirements,
       existing_labels: existingLabels,
       sprint_capacity_points: sprintCapacityPoints ?? undefined,
       target_sprint_count: targetSprintCount ?? undefined,
-    }),
-  /** Agentic Q&A over the space's own issues/comments — answers with citations, or abstains rather
-   *  than guessing. `spaceIds` scopes retrieval to spaces the caller already has (see SpaceContext) —
-   *  see gateway route ai-service-ask's comment for the trust-boundary note on that parameter.
-   *  `history` (optional, oldest-first) lets a follow-up resolve context from earlier turns — this
-   *  service is stateless, so the caller (AskAiPanel) owns the running transcript and resends it on
-   *  every call; omit/pass `[]` for an independent question. `traceParent` is the previous turn's own
-   *  `AskResponseDto.traceParent` (undefined for the first question of a conversation) — sent as a
-   *  real `traceparent` request header so this call's server span joins the same trace as the rest of
-   *  the conversation instead of starting a new one; see that field's doc comment. */
-  ask: (question: string, spaceIds: number[], history: ChatTurnDto[] = [], traceParent?: string) =>
-    api.post<AskResponseDto>(
-      '/api/ai/ask', { question, space_ids: spaceIds, history },
-      traceParent ? { traceparent: traceParent } : undefined,
-    ),
-  /** SSE variant of `ask`: identical request/response shape, but the wait is surfaced as it
-   *  happens. `onStage` fires with a human-readable progress label ("searching the knowledge
-   *  base", ...) at each checkpoint; `onToken` fires with fragments of the final answer's prose as
-   *  the model generates it (answer body only — never a clarification or an abstention). The
-   *  streamed text is an optimistic preview: this still resolves with the authoritative
-   *  `AskResponseDto` once the "result" event arrives, and `result.answer` may differ from the sum
-   *  of the tokens because a verification pass can rewrite the draft — so the caller must replace
-   *  whatever streamed with `result.answer`. See ai-service/app/api/routes.py's `POST /ask/stream`.
-   *  `traceParent`: see `ask()`'s parameter of the same name. */
+    }, onStage),
+  /** Agentic Q&A over the space's issues and comments: answers with citations, or abstains.
+   *  `history` (oldest first) lets follow-ups use earlier turns — the service is stateless, so the
+   *  panel resends the transcript. `traceParent` is the previous turn's value, sent as a
+   *  `traceparent` header so the whole conversation is one trace. `onStage` gets progress labels;
+   *  `onToken` gets pieces of the answer as it's written. The stream is a preview: verification can
+   *  rewrite the draft, so replace it with `result.answer` when the result arrives. */
   askStream: (
     question: string, spaceIds: number[], history: ChatTurnDto[] = [],
     onStage?: (label: string) => void, traceParent?: string,
@@ -668,6 +684,10 @@ export const aiApi = {
   startRolloutStream: (
     proposal: string,
     spaceId: number,
+    /** One per requirement. Each is searched for separately server-side, so an issue written for a
+     *  requirement is sized against the past work resembling that piece rather than the epic average.
+     *  Empty keeps the previous whole-proposal behaviour. */
+    requirements: string[] = [],
     existingLabels: string[] = [],
     sprintCapacityPoints: number | null = null,
     targetSprintCount: number | null = null,
@@ -676,6 +696,7 @@ export const aiApi = {
     consumeStageStream<RolloutStatusDto>('/api/ai/plan-epic/rollout/stream', {
       proposal,
       space_id: spaceId,
+      requirements,
       existing_labels: existingLabels,
       sprint_capacity_points: sprintCapacityPoints ?? undefined,
       target_sprint_count: targetSprintCount ?? undefined,
