@@ -34,11 +34,11 @@ export function getStoredAuthToken(): string | null {
 }
 
 /**
- * Paths that must not send a Bearer token: the API gateway validates JWT on every request that includes one.
- * Stale/invalid tokens would break login and user bootstrap (401) even though these routes are permitAll.
+ * Paths that must not send a Bearer token: services validate the JWT on every request that includes one.
+ * A stale token would break login (401) even though /api/auth is public.
  */
 function shouldSendBearer(path: string): boolean {
-  return !path.startsWith('/api/auth') && !path.startsWith('/api/users');
+  return !path.startsWith('/api/auth');
 }
 
 /**

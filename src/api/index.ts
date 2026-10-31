@@ -16,7 +16,7 @@ export { labelApi } from './labelApi';
 export { searchApi } from './searchApi';
 export { aiApi } from './aiApi';
 
-export type { LoginRequest, AuthTokenResponse } from './authApi';
+export type { LoginRequest, AuthTokenResponse, DemoAccountDto } from './authApi';
 export type { UserDto, CreateUserRequest } from './userApi';
 export type { GroupDto, CreateGroupRequest } from './groupApi';
 export type { SpaceDto, CreateSpaceRequest, AddMemberRequest } from './spaceApi';

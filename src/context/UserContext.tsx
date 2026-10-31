@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { userApi, authApi } from '../api';
-import type { UserDto } from '../api';
+import type { DemoAccountDto, UserDto } from '../api';
 import { setAuthToken, clearAuthToken, getStoredAuthToken } from '../api/client';
 import { nameFromJwtPayload, parseJwtPayload, uidFromJwtPayload, usernameFromJwtPayload } from '../utils/jwtPayload';
 
@@ -22,11 +22,15 @@ const EMPTY_USER: AppUser = {
 
 const AUTH_STORAGE_KEY = 'jira_auth_user';
 
-const SEED_USERS = [
-  { username: 'alice', name: 'Alice', email: 'alice@example.com', avatarColor: 'linear-gradient(135deg, #6366f1, #7c3aed)' },
-  { username: 'john', name: 'John', email: 'john@example.com', avatarColor: 'linear-gradient(135deg, #06b6d4, #3b82f6)' },
-  { username: 'charles', name: 'Charles', email: 'charles@example.com', avatarColor: 'linear-gradient(135deg, #10b981, #06b6d4)' },
-];
+function demoAccountToAppUser(dto: DemoAccountDto): AppUser {
+  return {
+    id: String(dto.id),
+    username: dto.username,
+    name: dto.name || dto.username,
+    avatarColor: dto.avatarColor || 'linear-gradient(135deg, #6366f1, #7c3aed)',
+    passwordLoginEnabled: true,
+  };
+}
 
 function dtoToAppUser(dto: UserDto): AppUser {
   const name = dto.name?.trim() || dto.username || 'User';
@@ -44,7 +48,7 @@ interface UserContextValue {
   currentUser: AppUser;
   setCurrentUser: (user: AppUser) => void;
   apiReady: boolean;
-  /** True while the first /api/users fetch (and optional seed) is in flight. */
+  /** True while the first user list (or, signed out, the demo-account list) is loading. */
   usersLoading: boolean;
   /** Set when user list cannot be loaded (quick-login hidden until fixed). */
   usersLoadError: string | null;
@@ -149,14 +153,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
       setGithubOAuthEnabled(githubOAuth);
 
-      let dtos = await userApi.getAll();
-      if (dtos.length === 0) {
-        for (const seed of SEED_USERS) {
-          await userApi.create(seed);
-        }
-        dtos = await userApi.getAll();
+      // The full user list needs a sign-in; before that, only the demo accounts are public.
+      // A stale token fails the first call (and clears the session), so fall back to the second.
+      let mapped: AppUser[] | null = null;
+      if (getStoredAuthToken()) {
+        mapped = await userApi.getAll().then((dtos) => dtos.map(dtoToAppUser)).catch(() => null);
       }
-      const mapped = dtos.map(dtoToAppUser);
+      if (mapped == null) {
+        mapped = (await authApi.getDemoAccounts()).map(demoAccountToAppUser);
+      }
       setUsers(mapped);
       USERS = mapped;
       applySessionFromStorage(mapped);
