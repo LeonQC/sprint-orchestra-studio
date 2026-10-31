@@ -486,6 +486,9 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
         }
       } else {
         setError(err instanceof Error ? err.message : String(err));
+        // A failed start (e.g. the AI was unavailable) still leaves a resumable run on the server;
+        // show its Resume button instead of a Start that would now 409.
+        void refreshAvailability();
       }
     } finally {
       setStarting(false);

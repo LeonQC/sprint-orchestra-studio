@@ -317,8 +317,8 @@ export function CreateTaskModal({
             )}
             {aiDegraded && (
               <p style={{ margin: '6px 0 0', fontSize: '0.78rem', color: '#d98226' }}>
-                AI drafting was unavailable — filled the title from your description as a starting
-                point; labels/estimate were not AI-suggested this time.
+                AI drafting is unavailable right now — the title was filled from your description;
+                labels and estimate were not AI-suggested. Try again in a few minutes.
               </p>
             )}
             {aiDependencies.length > 0 && (

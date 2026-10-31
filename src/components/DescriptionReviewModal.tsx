@@ -133,7 +133,8 @@ export function DescriptionReviewModal({
 
               {result.degraded && (
                 <p className="dr-hint dr-hint--warn">
-                  The AI check was unavailable. Your description is untouched — nothing was changed.
+                  The AI check is unavailable right now. Please try again in a few minutes — your
+                  description is untouched.
                 </p>
               )}
 

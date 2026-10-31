@@ -146,7 +146,8 @@ export function CommentDigestModal({ ticketKey, comments, onJumpToComment, onClo
               )}
               {result.degraded && (
                 <p className="cd-hint cd-hint--warn">
-                  AI summary was unavailable — the comment thread below is unaffected, just read it directly.
+                  The AI summary is unavailable right now. Please try again in a few minutes — the
+                  comments below are unaffected.
                 </p>
               )}
               {result.truncatedCount > 0 && (

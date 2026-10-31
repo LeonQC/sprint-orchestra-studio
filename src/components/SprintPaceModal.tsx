@@ -124,8 +124,8 @@ export function SprintPaceModal({ sprint, tickets, onClose }: SprintPaceModalPro
             <>
               {result.degraded && (
                 <p className="sp-hint sp-hint--warn">
-                  AI narrative was unavailable — showing a mechanically-assembled summary instead of a
-                  generated one. The stats above are unaffected either way.
+                  The AI summary is unavailable right now, so this one is put together from the sprint's
+                  numbers. The stats above are unaffected. Try again in a few minutes for the AI version.
                 </p>
               )}
               <p className="sp-summary">{result.summary}</p>

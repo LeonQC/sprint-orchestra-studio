@@ -152,7 +152,8 @@ export function PrecedentModal({
 
               {result.degraded && (
                 <p className="pr-hint pr-hint--warn">
-                  The search was unavailable — nothing was changed on this issue.
+                  Similar work couldn't be checked right now. Please try again in a few minutes —
+                  nothing was changed on this issue.
                 </p>
               )}
 
