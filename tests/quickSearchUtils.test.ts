@@ -7,9 +7,11 @@ import {
   MAX_RENDERED,
   PAGE_SIZE,
   applyExactFilter,
+  dedupeAgainstLocal,
   hitKey,
   matchedFieldLabels,
   rankLocalMatches,
+  remoteEmptyMessage,
   scoreMatch,
   snippetFor,
   visibleSlice,
@@ -222,4 +224,96 @@ test('snippet falls back when the backend sends no exactSnippet', () => {
   assert.equal(snippetFor(h, true), 'plain');
   const older = { ...hit('ATC-1', true), snippet: 'plain' } as SearchResultDto;
   assert.equal(snippetFor(older, true), 'plain');
+});
+
+// --- Dedupe against the quick-jump list, and the empty state it can produce ------------------------
+
+test('dedupe removes only the issue rows the quick-jump list above already shows', () => {
+  const remote = [hit('ATC-64', true), commentHit('ATC-64', 5003203, 5005313), hit('ATC-32', false)];
+  assert.deepEqual(
+    dedupeAgainstLocal(remote, new Set(['ATC-64'])).map(hitKey),
+    ['COMMENT-5005313', 'ISSUE-ATC-32-i1'],
+    'the comment on ATC-64 survives: it is not a row of the quick-jump list',
+  );
+});
+
+/**
+ * The reported bug. Searching "search recent orders" in AtlasCart, the backend returned exactly one
+ * exactMatch:true row — ATC-64 "Search recent orders by reference" — and because the current space
+ * owns ATC-64, the dedupe moved it into the quick-jump list. Ticking "Exact only" then emptied this
+ * section and explained it with "No exact matches for ...", which was false: the exact match was two
+ * rows higher on the same screen.
+ */
+test('regression: the empty state never denies an exact match the dedupe moved upward', () => {
+  const remote = [hit('ATC-64', true), commentHit('ATC-64', 5003203, 5005313), hit('ATC-32', false)];
+  const message = remoteEmptyMessage(remote, new Set(['ATC-64']), true, 'search recent orders');
+
+  assert.doesNotMatch(message, /No exact matches/, 'there IS one — it is just rendered above');
+  assert.equal(
+    message,
+    'Nothing else matches “search recent orders” exactly.'
+      + ' 2 near matches hidden — uncheck “Exact only” to see them.',
+  );
+});
+
+test('with no exact hit anywhere, the empty state still says so', () => {
+  const remote = [hit('ATC-32', false), hit('ATC-44', false)];
+  assert.equal(
+    remoteEmptyMessage(remote, new Set(), true, 'recnt ordrs'),
+    'No exact matches for “recnt ordrs”. 2 near matches hidden'
+      + ' — uncheck “Exact only” to see them.',
+  );
+});
+
+test('singular phrasing when exactly one near match is hidden', () => {
+  assert.equal(
+    remoteEmptyMessage([hit('ATC-32', false)], new Set(), true, 'ordrs'),
+    'No exact matches for “ordrs”. 1 near match hidden — uncheck “Exact only” to see it.',
+  );
+});
+
+test('several exact hits deduped upward still read as one statement about the rest', () => {
+  const remote = [hit('ATC-64', true), hit('ATC-32', true)];
+  assert.equal(
+    remoteEmptyMessage(remote, new Set(['ATC-64', 'ATC-32']), true, 'orders'),
+    'Nothing else matches “orders” exactly.',
+    'nothing is left in this section to hide, so no near-match clause',
+  );
+});
+
+/**
+ * The section is headed "Elsewhere", so its empty state must speak about the rest of the corpus.
+ * A sentence about "this space" makes the reader climb back up the dropdown to do the merging the
+ * UI should have done for them.
+ */
+test('the empty state answers the question its own section header asks', () => {
+  const remote = [hit('ATC-64', true), commentHit('ATC-64', 5003203, 5005313)];
+  const message = remoteEmptyMessage(remote, new Set(['ATC-64']), true, 'search recent orders');
+  assert.doesNotMatch(message, /this space/, 'the section is about every OTHER space');
+  assert.doesNotMatch(message, /above/, 'do not send the reader hunting for a row they just read');
+  assert.match(message, /^Nothing else matches/);
+});
+
+test('an exact hit deduped upward is still counted when the backend omits exactMatch', () => {
+  const remote = [hit('ATC-64', undefined)];
+  assert.match(
+    remoteEmptyMessage(remote, new Set(['ATC-64']), true, 'orders'),
+    /^Nothing else matches/,
+    'absent means unknown; claiming "no exact matches" would be the same lie as before',
+  );
+});
+
+test('with the toggle off, the empty state is about matches, not exactness', () => {
+  assert.equal(
+    remoteEmptyMessage([], new Set(), false, 'zzz'),
+    'No full-text matches for “zzz”.',
+  );
+});
+
+test('a query that matched nothing at all reads the same under "Exact only"', () => {
+  assert.equal(
+    remoteEmptyMessage([], new Set(), true, 'zzz'),
+    'No full-text matches for “zzz”.',
+    'no hits and no hidden rows — "no exact matches" would imply near ones exist',
+  );
 });

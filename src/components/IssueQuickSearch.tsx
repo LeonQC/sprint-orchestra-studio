@@ -12,9 +12,11 @@ import {
   INITIAL_VISIBLE,
   PAGE_SIZE,
   applyExactFilter,
+  dedupeAgainstLocal,
   hitKey,
   matchedFieldLabels,
   rankLocalMatches,
+  remoteEmptyMessage,
   snippetFor,
   visibleSlice,
 } from './quickSearchUtils';
@@ -111,7 +113,7 @@ export function IssueQuickSearch() {
   // don't repeat the same issue in the full-text section below it.
   const localIds = useMemo(() => new Set(rankedMatches.map((t) => t.id)), [rankedMatches]);
   const dedupedRemote = useMemo(
-    () => remoteResults.filter((r) => !(r.type === 'ISSUE' && localIds.has(r.issueKey))),
+    () => dedupeAgainstLocal(remoteResults, localIds),
     [remoteResults, localIds],
   );
   // "Exact only" is applied to the full-text half alone: the quick-jump list above is already
@@ -120,7 +122,14 @@ export function IssueQuickSearch() {
     () => applyExactFilter(dedupedRemote, exactOnly),
     [dedupedRemote, exactOnly],
   );
-  const hiddenByExact = dedupedRemote.length - visibleRemote.length;
+  // Built from the UNdeduped results on purpose: the dedupe above can move an exact hit out of this
+  // section without making it stop existing, and the empty state has to say which of the two
+  // happened rather than reporting "no exact matches" for a row that is on screen. See
+  // remoteEmptyMessage().
+  const emptyMessage = useMemo(
+    () => remoteEmptyMessage(remoteResults, localIds, exactOnly, query),
+    [remoteResults, localIds, exactOnly, query],
+  );
 
   const spaceById = useMemo(() => new Map(spaces.map((s) => [Number(s.id), s])), [spaces]);
 
@@ -358,12 +367,17 @@ export function IssueQuickSearch() {
 
           {showRemoteSection && (
             <>
+              {/* "Elsewhere", not "All spaces": this section deliberately excludes the issues the
+                  quick-jump list above already shows, and saying "all" invited the reading that a
+                  hit missing from here was missing from the search. That is what made ticking
+                  "Exact only" look broken — the one exact hit was in the list above, so this section
+                  emptied and appeared to be reporting nothing found. */}
               <div className="iqs__section-label">
-                All spaces · all fields
+                Elsewhere · all spaces &amp; fields
                 {remoteLoading && <span className="iqs__loading-dot" aria-hidden />}
                 {/* Sits inside the existing section header rather than adding a toolbar: it filters
                     this section only, and the header is already a flex row with room on the right. */}
-                <label className="iqs__exact-toggle" title="Show only results that contain your text exactly — hides stemmed (orders/order) and near-spelling matches">
+                <label className="iqs__exact-toggle" title="Filters this section only. Hides matches that needed stemming (orders → order) or typo-correction. The list above is literal by definition, so it never changes.">
                   <input
                     type="checkbox"
                     checked={exactOnly}
@@ -377,17 +391,7 @@ export function IssueQuickSearch() {
                 </label>
               </div>
               {visibleRemote.length === 0 && !remoteLoading && (
-                <div className="iqs__empty iqs__empty--remote">
-                  {hiddenByExact > 0 ? (
-                    <>
-                      No exact matches for “{query.trim()}” — {hiddenByExact} near match
-                      {hiddenByExact === 1 ? ' is' : 'es are'} hidden. Uncheck “Exact only” to see
-                      {hiddenByExact === 1 ? ' it' : ' them'}.
-                    </>
-                  ) : (
-                    <>No full-text matches for “{query.trim()}”.</>
-                  )}
-                </div>
+                <div className="iqs__empty iqs__empty--remote">{emptyMessage}</div>
               )}
               {visibleRemote.map((hit, hitIndex) => {
                 // Key by hitKey, not by issueId: several comments on one issue are several rows, and

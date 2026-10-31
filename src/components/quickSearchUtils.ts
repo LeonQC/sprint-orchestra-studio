@@ -109,15 +109,9 @@ export function matchedFieldLabels(fields: string[] | undefined): string[] {
 }
 
 /**
- * "Exact only": keep the hits whose text literally contains what was typed, dropping the ones that
- * only matched after stemming ("orders" → "order") or typo-correction (fuzzy). A filter over the
- * already-ranked list, never a re-query, so toggling it can't reorder what's on screen.
- *
- * A row with `exactMatch` absent is KEPT. That's the older-backend case, and silently hiding real
- * results is a far worse failure than showing one loose match.
- *
- * Note this is only applied to backend hits: the local quick-jump list is literal by construction
- * (`scoreMatch` only ever uses ===/startsWith/includes), so the filter would be a no-op there.
+ * "Exact only": keep hits that literally contain the query, dropping stemmed or fuzzy matches. Filters
+ * the ranked list (never re-queries), so order doesn't change. Rows without `exactMatch` (older
+ * backend) are kept. Local quick-jump results are already literal, so this only applies to backend hits.
  */
 export function applyExactFilter(hits: SearchResultDto[], exactOnly: boolean): SearchResultDto[] {
   if (!exactOnly) return hits;
@@ -125,18 +119,62 @@ export function applyExactFilter(hits: SearchResultDto[], exactOnly: boolean): S
 }
 
 /**
- * Stable, UNIQUE identity for a backend hit — its React `key` and the handle used to find its index
- * for keyboard navigation.
+ * Backend hits minus the ones the quick-jump list above already shows, so one issue never occupies
+ * two rows of the same dropdown. Issue hits only: a comment hit is never in that list, even when
+ * its issue is.
+ */
+export function dedupeAgainstLocal(
+  hits: SearchResultDto[],
+  localIds: Set<string>,
+): SearchResultDto[] {
+  return hits.filter((h) => !(h.type === 'ISSUE' && localIds.has(h.issueKey)));
+}
+
+/**
+ * Empty-state text for the "Elsewhere" section, which answers one question: is there anything beyond
+ * the quick-jump list above?
  *
- * This must not be derived from `issueId` alone. One issue can contribute several comment hits, so
- * `COMMENT-<issueId>` collides. Duplicate keys are not merely a console warning here: when React
- * reconciles a shrinking list it maps the surviving children by key, and duplicates overwrite each
- * other in that map — so the colliding fibers are never scheduled for deletion and their DOM nodes
- * survive. That is exactly how ticking "Exact only" appeared to leave non-exact rows on screen: the
- * filter was correct, the rows were stale renders of the pre-filter list.
+ * Exactness is counted on the list BEFORE deduping: the deduped rows are exactly the likely exact
+ * matches, so counting after deduping wrongly said "No exact matches" (seen with "search recent
+ * orders", whose one exact hit, ATC-64, had moved up). The wording talks about the rest of the corpus
+ * ("Nothing else"), so nobody is sent back up to re-read a row.
+ */
+export function remoteEmptyMessage(
+  remoteResults: SearchResultDto[],
+  localIds: Set<string>,
+  exactOnly: boolean,
+  query: string,
+): string {
+  const q = query.trim();
+  if (!exactOnly) return `No full-text matches for “${q}”.`;
+
+  const nearMatches = dedupeAgainstLocal(remoteResults, localIds).length;
+  const exactAbove = remoteResults.some(
+    (h) => h.type === 'ISSUE' && localIds.has(h.issueKey) && h.exactMatch !== false,
+  );
+
+  const hidden =
+    nearMatches === 0
+      ? ''
+      : nearMatches === 1
+        ? ' 1 near match hidden — uncheck “Exact only” to see it.'
+        : ` ${nearMatches} near matches hidden — uncheck “Exact only” to see them.`;
+
+  if (exactAbove) {
+    return `Nothing else matches “${q}” exactly.${hidden}`;
+  }
+  if (nearMatches === 0) {
+    return `No full-text matches for “${q}”.`;
+  }
+  return `No exact matches for “${q}”.${hidden}`;
+}
+
+/**
+ * Unique, stable key for a backend hit (React `key` and keyboard-navigation handle).
  *
- * `resultId` is the underlying row id (issue id / comment id). Falls back to a positional key for an
- * older backend that doesn't send it — still unique, just not stable across reorders.
+ * Not `issueId` alone: one issue can have several comment hits, and duplicate keys made React keep
+ * stale rows on screen after "Exact only" filtered them out. Uses `resultId` (row id); falls back to a
+ * positional key for older backends.
  */
 export function hitKey(hit: SearchResultDto, index: number): string {
   return hit.resultId != null ? `${hit.type}-${hit.resultId}` : `${hit.type}-${hit.issueKey}-i${index}`;
