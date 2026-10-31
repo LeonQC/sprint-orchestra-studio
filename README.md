@@ -29,7 +29,7 @@ npm run dev                  # http://localhost:5173
 The SPA calls relative paths (`/api/...`, `/api/ai/...`) with `fetch`. In dev, the Vite server proxies
 them (see `vite.config.ts`): `/api/ai/*` goes to ai-service (`:8200`, prefix stripped), everything else
 under `/api` and the GitHub OAuth paths go to jira-backend (`:8081`). Override the targets with
-`JIRA_BACKEND_URL` / `AI_SERVICE_URL`. When deployed, AWS API Gateway does the same routing.
+`JIRA_BACKEND_URL` / `AI_SERVICE_URL`. When deployed, AWS CloudFront and an Application Load Balancer do the same routing.
 
 Leave **`VITE_API_URL`** unset unless a build is served from a different origin than its API; then set
 it to that API origin before `npm run build`.

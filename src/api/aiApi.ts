@@ -1,7 +1,7 @@
 import { api } from './client';
 
 /**
- * Called as `/api/ai/**` on the app's own origin; the Vite dev proxy (API Gateway when deployed)
+ * Called as `/api/ai/**` on the app's own origin; the Vite dev proxy (CloudFront + ALB when deployed)
  * strips the prefix and forwards to ai-service, which verifies the same JWT as every other call.
  */
 

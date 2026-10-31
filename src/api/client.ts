@@ -1,6 +1,6 @@
 import { parseApiError } from './apiError';
 
-// Empty = same origin: the Vite dev proxy locally, API Gateway when deployed (see vite.config.ts).
+// Empty = same origin: the Vite dev proxy locally, CloudFront + ALB when deployed (see vite.config.ts).
 const BASE_URL = import.meta.env.VITE_API_URL ?? '';
 
 const TOKEN_STORAGE_KEY = 'jira_auth_token';

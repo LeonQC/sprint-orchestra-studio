@@ -8,7 +8,7 @@ const AI_SERVICE = process.env.AI_SERVICE_URL ?? 'http://localhost:8200'
 export default defineConfig({
   plugins: [react()],
   server: {
-    // The dev server is the one browser-facing origin, routing like API Gateway does when deployed.
+    // The dev server is the one browser-facing origin, routing like CloudFront + ALB do when deployed.
     // Same origin, so no CORS. Entries are matched in order: /api/ai must come before /api.
     proxy: {
       '/api/ai': { target: AI_SERVICE, rewrite: (path) => path.replace(/^\/api\/ai/, '') },
