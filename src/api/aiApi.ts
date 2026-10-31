@@ -1,11 +1,8 @@
 import { api } from './client';
 
 /**
- * Routed through the gateway (`/api/ai/**`, see gateway/src/main/resources/application.yml's
- * `ai-service-draft-task` route), not called directly against ai-service — same auth boundary
- * (JWT, enforced globally for `/api/**` by GatewaySecurityConfig) every other API call in this app
- * goes through, unlike the project's standalone demo page (`demo/index.html`), which talks to
- * ai-service directly with an open CORS policy meant only for local backend-only testing.
+ * Called as `/api/ai/**` on the app's own origin; the Vite dev proxy (API Gateway when deployed)
+ * strips the prefix and forwards to ai-service, which verifies the same JWT as every other call.
  */
 
 /** Consumes a `text/event-stream` response shaped as `event: <name>\ndata: <json>\n\n` frames — the

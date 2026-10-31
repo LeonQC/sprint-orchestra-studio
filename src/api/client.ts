@@ -1,19 +1,13 @@
 import { parseApiError } from './apiError';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
-
-if (import.meta.env.DEV && /:8081(\/|$)/.test(BASE_URL)) {
-  console.warn(
-    '[api] VITE_API_URL must point to the Spring Cloud Gateway (default :8080), not the backend (:8081). ' +
-      'Browser requests cannot send X-Gateway-Internal; calls to :8081 return 403 and the login page user list will be empty.',
-  );
-}
+// Empty = same origin: the Vite dev proxy locally, API Gateway when deployed (see vite.config.ts).
+const BASE_URL = import.meta.env.VITE_API_URL ?? '';
 
 const TOKEN_STORAGE_KEY = 'jira_auth_token';
 
 /**
  * fetch() rejects with an opaque TypeError ("Failed to fetch") when the server is
- * unreachable (gateway down/restarting) — surface something actionable instead.
+ * unreachable (dev server or a service down/restarting) — surface something actionable instead.
  */
 async function fetchOrConnectError(input: string, init: RequestInit): Promise<Response> {
   try {

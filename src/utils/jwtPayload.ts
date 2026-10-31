@@ -1,4 +1,4 @@
-/** Decode JWT payload (no signature verification — for UI only; trust comes from the gateway/backend). */
+/** Decode JWT payload (no signature verification — for UI only; trust comes from the services that verify it). */
 export function parseJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split('.');

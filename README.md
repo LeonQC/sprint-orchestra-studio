@@ -26,20 +26,17 @@ npm run dev                  # http://localhost:5173
 
 ## API URL
 
-The SPA calls the backend with `fetch`. Base URL is set in **`VITE_API_URL`** (build-time / dev env).  
-If unset, it defaults to **`http://localhost:8080`** — typically the Spring Cloud Gateway or the Spring Boot API, **not** a direct `:8081` service URL from the browser (see warnings in `src/api/client.ts`).
+The SPA calls relative paths (`/api/...`, `/api/ai/...`) with `fetch`. In dev, the Vite server proxies
+them (see `vite.config.ts`): `/api/ai/*` goes to ai-service (`:8200`, prefix stripped), everything else
+under `/api` and the GitHub OAuth paths go to jira-backend (`:8081`). Override the targets with
+`JIRA_BACKEND_URL` / `AI_SERVICE_URL`. When deployed, AWS API Gateway does the same routing.
 
-Example `.env.local`:
-
-```bash
-VITE_API_URL=http://localhost:8080
-```
-
-For production builds, set `VITE_API_URL` to your public API origin before `npm run build`.
+Leave **`VITE_API_URL`** unset unless a build is served from a different origin than its API; then set
+it to that API origin before `npm run build`.
 
 ## CORS
 
-The backend must allow your SPA origin (e.g. `http://localhost:5173` in dev). Configure that in the API gateway / Spring CORS settings.
+None needed: the browser only ever talks to one origin.
 
 ## Own Git repository
 
@@ -55,4 +52,4 @@ git push -u origin main
 
 ## Related repo
 
-Backend (Java/Spring Boot), gateway, database migrations, and Docker Compose live in the **jira-agentic-ai** monorepo.
+Backend (Java/Spring Boot), ai-service, database migrations, and Docker Compose live in the **sprint-orchestra-core** monorepo.
