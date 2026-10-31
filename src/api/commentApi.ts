@@ -4,6 +4,8 @@ import type { CommentDto } from './issueApi';
 export interface CreateCommentRequest {
   authorId: number;
   content: string;
+  /** Replying to a reply is fine; the server attaches it to that reply's top-level comment. */
+  parentId?: number;
 }
 
 export const commentApi = {

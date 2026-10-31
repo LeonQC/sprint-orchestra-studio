@@ -4761,6 +4761,69 @@
   margin-top: 0.5rem;
 }
 
+.ticket-detail__comment-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* One indent level only: replies to replies stay here with a "Replying to X" label instead. */
+.ticket-detail__comment-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-left: 2.5rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+}
+
+.ticket-detail__comment-reply-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 0.25rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ticket-detail__comment-reply-btn:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.ticket-detail__comment-reply-to {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 0.125rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.ticket-detail__comment-reply-to:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.ticket-detail__comment-reply-to--deleted {
+  cursor: default;
+  font-style: italic;
+}
+
+.ticket-detail__comment-reply-to--deleted:hover {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.ticket-detail__comment-reply-editor {
+  display: flex;
+  flex-direction: column;
+}
+
 .ticket-detail__comment-text {
   margin: 0;
   font-size: 0.875rem;

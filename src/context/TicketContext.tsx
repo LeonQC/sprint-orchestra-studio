@@ -91,6 +91,8 @@ function issueDtoToTicket(dto: IssueDto): Ticket {
       authorId: c.authorId,
       author: c.authorName,
       content: c.content,
+      parentId: c.parentId != null ? String(c.parentId) : undefined,
+      replyToId: c.replyToId != null ? String(c.replyToId) : undefined,
       createdAt: c.createdAt,
     })) ?? [],
     linkedIssues: dto.linkedIssues?.map((l) => ({
@@ -232,7 +234,7 @@ interface TicketContextValue {
   deleteSprint: (sprintId: string) => void;
   createIssueInSprint: (sprintId: string | null, title: string, storyPoints?: number) => void;
   deleteTicket: (ticketId: string) => void;
-  addComment: (issueDbId: number, authorId: number, content: string) => void;
+  addComment: (issueDbId: number, authorId: number, content: string, parentId?: number) => void;
   editComment: (issueDbId: number, commentId: number, content: string) => void;
   deleteComment: (issueDbId: number, commentId: number) => void;
   addIssueLink: (issueDbId: number, relation: string, targetIssueKey: string) => Promise<void>;
@@ -934,10 +936,10 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
 
   // ── Add comment ──
   const addComment = useCallback(
-    (issueDbId: number, authorId: number, content: string) => {
+    (issueDbId: number, authorId: number, content: string, parentId?: number) => {
       if (canApi) {
         const issueKey = currentData.tickets.find((t) => t.dbId === issueDbId)?.id;
-        commentApi.create(issueDbId, { authorId, content })
+        commentApi.create(issueDbId, { authorId, content, parentId })
           .then(() => fetchFromApi(issueKey ? { mergeDetailForKeys: [issueKey] } : undefined))
           .catch(() => {});
       }

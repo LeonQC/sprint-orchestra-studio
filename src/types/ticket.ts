@@ -101,6 +101,10 @@ export interface Comment {
   authorId?: number;
   author: string;
   content: string;
+  /** Top-level comment this replies to; undefined for a top-level comment. Threads are two levels deep. */
+  parentId?: string;
+  /** The comment actually answered; differs from parentId when replying to a reply. */
+  replyToId?: string;
   createdAt: string;
 }
 

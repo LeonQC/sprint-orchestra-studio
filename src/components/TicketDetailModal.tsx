@@ -160,7 +160,7 @@ interface TicketDetailModalProps {
   onUpdate: (updated: Ticket) => void | Promise<boolean>;
   onCreateSubtask: (parentId: string, title: string) => void | Promise<boolean>;
   onDeleteTicket?: (ticketId: string) => void;
-  onAddComment?: (issueDbId: number, authorId: number, content: string) => void;
+  onAddComment?: (issueDbId: number, authorId: number, content: string, parentId?: number) => void;
   onEditComment?: (issueDbId: number, commentId: number, content: string) => void;
   onDeleteComment?: (issueDbId: number, commentId: number) => void;
   onAddIssueLink?: (issueDbId: number, relation: string, targetIssueKey: string) => Promise<void>;
@@ -544,6 +544,9 @@ export function TicketDetailModal({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentText, setEditingCommentText] = useState('');
   const [editingCommentAttachmentNames, setEditingCommentAttachmentNames] = useState<string[]>([]);
+  /** Open inline reply box: the thread it goes under and the comment it answers. */
+  const [replyTarget, setReplyTarget] = useState<{ rootId: string; replyToId: string } | null>(null);
+  const [replyHtml, setReplyHtml] = useState('');
   const [epicPickerOpen, setEpicPickerOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const subtaskInputRef = useRef<HTMLInputElement>(null);
@@ -553,6 +556,7 @@ export function TicketDetailModal({
   const editorAttachmentInputRef = useRef<HTMLInputElement>(null);
   const commentEditorRef = useRef<HTMLDivElement>(null);
   const editingCommentEditorRef = useRef<HTMLDivElement>(null);
+  const replyEditorRef = useRef<HTMLDivElement>(null);
   const descriptionEditorRef = useRef<HTMLDivElement>(null);
   const descPendingRef = useRef(new Map<string, PendingAttachment>());
   const descInsertQueueRef = useRef<PendingAttachment[]>([]);
@@ -610,6 +614,8 @@ export function TicketDetailModal({
     setEditingCommentId(null);
     setEditingCommentText('');
     setEditingCommentAttachmentNames([]);
+    setReplyTarget(null);
+    setReplyHtml('');
     setEpicPickerOpen(false);
     setActivityTab('comments');
     setAttachments(ticket.attachments ?? []);
@@ -619,6 +625,13 @@ export function TicketDetailModal({
     setLinkHighlightIndex(0);
     setLifecycleBarZoom(0);
   }, [ticket.id]);
+
+  useEffect(() => {
+    const editor = replyEditorRef.current;
+    if (!replyTarget || !editor) return;
+    editor.innerHTML = '';
+    editor.focus();
+  }, [replyTarget]);
 
   useEffect(() => {
     if (!editingCommentId) return;
@@ -762,6 +775,24 @@ export function TicketDetailModal({
     return draft.comments ?? [];
   }, [activityTab, draft.comments]);
 
+  /** Newest thread first (same order as before threads existed); replies oldest-first under it. */
+  const commentThreads = useMemo(() => {
+    const ids = new Set(commentsForActivityList.map((c) => c.id));
+    const repliesByRoot = new Map<string, Comment[]>();
+    const roots: Comment[] = [];
+    for (const c of commentsForActivityList) {
+      // A reply whose parent isn't loaded yet still shows, as its own thread, instead of vanishing.
+      if (c.parentId && ids.has(c.parentId)) {
+        const list = repliesByRoot.get(c.parentId) ?? [];
+        list.push(c);
+        repliesByRoot.set(c.parentId, list);
+      } else {
+        roots.push(c);
+      }
+    }
+    return roots.slice().reverse().map((root) => ({ root, replies: repliesByRoot.get(root.id) ?? [] }));
+  }, [commentsForActivityList]);
+
   useEffect(() => {
     if (activityTab !== 'worklog' && activityTab !== 'all') setLifecycleBarTip(null);
   }, [activityTab]);
@@ -793,6 +824,8 @@ export function TicketDetailModal({
             authorId: c.authorId,
             author: c.authorName,
             content: c.content,
+            parentId: c.parentId != null ? String(c.parentId) : undefined,
+            replyToId: c.replyToId != null ? String(c.replyToId) : undefined,
             createdAt: c.createdAt,
           })) ?? prev.comments ?? [],
         }));
@@ -1209,10 +1242,56 @@ export function TicketDetailModal({
   }
 
   function handleDeleteComment(comment: Comment) {
-    patch('comments', (draft.comments ?? []).filter((c) => c.id !== comment.id));
+    const replyCount = comment.parentId
+      ? 0
+      : (draft.comments ?? []).filter((c) => c.parentId === comment.id).length;
+    if (replyCount > 0 && !window.confirm(
+      `Delete this comment and its ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}?`,
+    )) return;
+    patch('comments', (draft.comments ?? []).filter((c) => c.id !== comment.id && c.parentId !== comment.id));
+    if (replyTarget?.rootId === comment.id) handleCancelReply();
     if (onDeleteComment && ticket.dbId != null) {
       onDeleteComment(ticket.dbId, Number(comment.id));
     }
+  }
+
+  function handleStartReply(comment: Comment) {
+    const rootId = comment.parentId ?? comment.id;
+    // Still the optimistic placeholder (`c-…`); the server id arrives with the refetch.
+    if (!Number.isFinite(Number(comment.id))) return;
+    setReplyTarget({ rootId, replyToId: comment.id });
+    setReplyHtml('');
+  }
+
+  function handleCancelReply() {
+    setReplyTarget(null);
+    setReplyHtml('');
+    if (replyEditorRef.current) replyEditorRef.current.innerHTML = '';
+  }
+
+  function handleAddReply() {
+    if (!ticket.dbId || !replyTarget) return;
+    const content = normalizeCommentHtml((replyEditorRef.current?.innerHTML ?? replyHtml).trim());
+    if (!stripHtml(content).trim()) return;
+    const now = new Date().toISOString();
+    const authorName = (
+      currentUserId != null
+        ? USERS.find((u) => Number(u.id) === currentUserId)?.name
+        : undefined
+    ) ?? 'You';
+    patch('comments', [...(draft.comments ?? []), {
+      id: `c-${Date.now()}`,
+      authorId: currentUserId,
+      author: authorName,
+      content,
+      parentId: replyTarget.rootId,
+      replyToId: replyTarget.replyToId,
+      createdAt: now,
+    }]);
+    if (onAddComment && currentUserId != null) {
+      onAddComment(ticket.dbId, currentUserId, content, Number(replyTarget.replyToId));
+    }
+    handleCancelReply();
   }
 
   function handleStartEditComment(comment: Comment) {
@@ -1668,6 +1747,167 @@ export function TicketDetailModal({
     setPreviewTable(null);
     setPreviewSheetName(null);
     setPreviewLoading(false);
+  }
+
+  function renderCommentItem(c: Comment) {
+    return (
+      <div
+        key={c.id}
+        id={`ticket-detail-comment-${c.id}`}
+        className={`ticket-detail__comment${highlightedCommentId === c.id ? ' ticket-detail__comment--highlighted' : ''}`}
+      >
+        <div className="ticket-detail__avatar">{c.author.charAt(0).toUpperCase()}</div>
+        <div className="ticket-detail__comment-body">
+          {renderReplyToLabel(c)}
+          <div className="ticket-detail__comment-meta">
+            <span className="ticket-detail__comment-author">{c.author}</span>
+            <span className="ticket-detail__comment-time" title={formatTs(c.createdAt)}>
+              {formatRelativeTime(c.createdAt)}
+            </span>
+            {currentUserId != null && c.authorId === currentUserId && editingCommentId !== c.id && (
+              <>
+                <button
+                  type="button"
+                  className="ticket-detail__comment-action"
+                  title="Edit comment"
+                  onClick={() => handleStartEditComment(c)}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  className="ticket-detail__comment-action ticket-detail__comment-action--delete"
+                  title="Delete comment"
+                  onClick={() => handleDeleteComment(c)}
+                >
+                  ✕
+                </button>
+              </>
+            )}
+          </div>
+          {editingCommentId === c.id ? (
+            <div className="ticket-detail__comment-edit">
+              {renderEditorToolbar('comment-edit')}
+              <div
+                ref={editingCommentEditorRef}
+                className="ticket-detail__comment-rich-editor ticket-detail__comment-input--editor"
+                contentEditable
+                suppressContentEditableWarning
+                data-placeholder="Type / to add elements or @ to mention someone."
+                onInput={(e) => setEditingCommentText((e.target as HTMLDivElement).innerHTML)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    handleSaveEditComment();
+                  }
+                }}
+              />
+              {renderInlineAttachmentPreviews(editingCommentAttachmentNames.join('\n'))}
+              <div className="ticket-detail__comment-edit-actions">
+                <button
+                  type="button"
+                  className="ticket-detail__btn ticket-detail__btn--primary"
+                  onClick={handleSaveEditComment}
+                  disabled={!stripHtml(editingCommentText).trim() && !htmlHasAttachmentMarkers(editingCommentText)}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className="ticket-detail__btn ticket-detail__btn--ghost"
+                  onClick={() => {
+                    revokePendingMap(commentEditPendingRef.current);
+                    setEditingCommentId(null);
+                    setEditingCommentText('');
+                    setEditingCommentAttachmentNames([]);
+                    if (editingCommentEditorRef.current) editingCommentEditorRef.current.innerHTML = '';
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            (/<\/?[a-z][\s\S]*>/i.test(c.content)
+              ? <div
+                  className="ticket-detail__comment-rich-content"
+                  dangerouslySetInnerHTML={{ __html: hydrateCommentHtml(c.content) }}
+                  onClick={handleCommentAttachmentClick}
+                />
+              : renderCommentWithAttachments(c.content))
+          )}
+          {editingCommentId !== c.id && (
+            <button
+              type="button"
+              className="ticket-detail__comment-reply-btn"
+              onClick={() => handleStartReply(c)}
+            >
+              Reply
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /** Only for a reply to a reply: replying to the top-level comment is already clear from placement. */
+  function renderReplyToLabel(c: Comment) {
+    if (!c.parentId || c.replyToId === c.parentId) return null;
+    const target = c.replyToId ? (draft.comments ?? []).find((x) => x.id === c.replyToId) : undefined;
+    // Every reply records what it answered, so a reply with no target left (the server clears
+    // reply_to_id on delete) answered a comment that has since been deleted.
+    if (!target) {
+      return <span className="ticket-detail__comment-reply-to ticket-detail__comment-reply-to--deleted">↪ Replying to a deleted comment</span>;
+    }
+    return (
+      <button
+        type="button"
+        className="ticket-detail__comment-reply-to"
+        title="Show the comment this replies to"
+        onClick={() => setHighlightedCommentId(target.id)}
+      >
+        ↪ Replying to {target.author}
+      </button>
+    );
+  }
+
+  function replyEditorPlaceholder() {
+    const target = (draft.comments ?? []).find((x) => x.id === replyTarget?.replyToId);
+    return target ? `Reply to ${target.author}...` : 'Write a reply...';
+  }
+
+  function renderReplyEditor() {
+    return (
+      <div className="ticket-detail__comment-reply-editor">
+        <div
+          ref={replyEditorRef}
+          className="ticket-detail__comment-rich-editor ticket-detail__comment-input--editor"
+          contentEditable
+          suppressContentEditableWarning
+          data-placeholder={replyEditorPlaceholder()}
+          onInput={(e) => setReplyHtml((e.target as HTMLDivElement).innerHTML)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleAddReply();
+            }
+          }}
+        />
+        <div className="ticket-detail__comment-edit-actions">
+          <button
+            type="button"
+            className="ticket-detail__btn ticket-detail__btn--primary"
+            onClick={handleAddReply}
+            disabled={!stripHtml(replyHtml).trim()}
+          >
+            Reply
+          </button>
+          <button type="button" className="ticket-detail__btn ticket-detail__btn--ghost" onClick={handleCancelReply}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
   }
 
   function renderCommentWithAttachments(content: string) {
@@ -2713,92 +2953,15 @@ export function TicketDetailModal({
                 {commentsForActivityList.length === 0 && (
                   <p className="ticket-detail__no-comments">No comments yet.</p>
                 )}
-                {commentsForActivityList.slice().reverse().map((c) => (
-                  <div
-                    key={c.id}
-                    id={`ticket-detail-comment-${c.id}`}
-                    className={`ticket-detail__comment${highlightedCommentId === c.id ? ' ticket-detail__comment--highlighted' : ''}`}
-                  >
-                    <div className="ticket-detail__avatar">{c.author.charAt(0).toUpperCase()}</div>
-                    <div className="ticket-detail__comment-body">
-                      <div className="ticket-detail__comment-meta">
-                        <span className="ticket-detail__comment-author">{c.author}</span>
-                        <span className="ticket-detail__comment-time" title={formatTs(c.createdAt)}>
-                          {formatRelativeTime(c.createdAt)}
-                        </span>
-                        {currentUserId != null && c.authorId === currentUserId && editingCommentId !== c.id && (
-                          <>
-                            <button
-                              type="button"
-                              className="ticket-detail__comment-action"
-                              title="Edit comment"
-                              onClick={() => handleStartEditComment(c)}
-                            >
-                              ✎
-                            </button>
-                            <button
-                              type="button"
-                              className="ticket-detail__comment-action ticket-detail__comment-action--delete"
-                              title="Delete comment"
-                              onClick={() => handleDeleteComment(c)}
-                            >
-                              ✕
-                            </button>
-                          </>
-                        )}
+                {commentThreads.map(({ root, replies }) => (
+                  <div key={root.id} className="ticket-detail__comment-thread">
+                    {renderCommentItem(root)}
+                    {(replies.length > 0 || replyTarget?.rootId === root.id) && (
+                      <div className="ticket-detail__comment-replies">
+                        {replies.map((r) => renderCommentItem(r))}
+                        {replyTarget?.rootId === root.id && renderReplyEditor()}
                       </div>
-                      {editingCommentId === c.id ? (
-                        <div className="ticket-detail__comment-edit">
-                          {renderEditorToolbar('comment-edit')}
-                          <div
-                            ref={editingCommentEditorRef}
-                            className="ticket-detail__comment-rich-editor ticket-detail__comment-input--editor"
-                            contentEditable
-                            suppressContentEditableWarning
-                            data-placeholder="Type / to add elements or @ to mention someone."
-                            onInput={(e) => setEditingCommentText((e.target as HTMLDivElement).innerHTML)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                                e.preventDefault();
-                                handleSaveEditComment();
-                              }
-                            }}
-                          />
-                          {renderInlineAttachmentPreviews(editingCommentAttachmentNames.join('\n'))}
-                          <div className="ticket-detail__comment-edit-actions">
-                            <button
-                              type="button"
-                              className="ticket-detail__btn ticket-detail__btn--primary"
-                              onClick={handleSaveEditComment}
-                              disabled={!stripHtml(editingCommentText).trim() && !htmlHasAttachmentMarkers(editingCommentText)}
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              className="ticket-detail__btn ticket-detail__btn--ghost"
-                              onClick={() => {
-                                revokePendingMap(commentEditPendingRef.current);
-                                setEditingCommentId(null);
-                                setEditingCommentText('');
-                                setEditingCommentAttachmentNames([]);
-                                if (editingCommentEditorRef.current) editingCommentEditorRef.current.innerHTML = '';
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        (/<\/?[a-z][\s\S]*>/i.test(c.content)
-                          ? <div
-                              className="ticket-detail__comment-rich-content"
-                              dangerouslySetInnerHTML={{ __html: hydrateCommentHtml(c.content) }}
-                              onClick={handleCommentAttachmentClick}
-                            />
-                          : renderCommentWithAttachments(c.content))
-                      )}
-                    </div>
+                    )}
                   </div>
                 ))}
               </div>
