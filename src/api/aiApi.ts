@@ -226,7 +226,7 @@ export interface AskResponseDto {
   stageTimings?: StageTimingsDto;
   /** A W3C `traceparent` naming this call's own entrypoint span (see ai-service's
    *  `_current_traceparent`). Send it back as a literal `traceparent` request header on the next
-   *  `ask`/`askStream` call in the same conversation (see `aiApi.ask`'s `traceParent` param) so that
+   *  `askStream` call in the same conversation (see `aiApi.askStream`'s `traceParent` param) so that
    *  request's span joins this same trace instead of starting a disconnected one — the fix for a
    *  clarification round (or any other follow-up) showing up as two separate traces. Optional so a
    *  rolling frontend deploy still accepts an older backend. */
@@ -407,17 +407,11 @@ export interface CommentDigestResponseDto {
 }
 
 /**
- * Sprint recovery: diagnose -> grounded root-cause hypotheses -> confidence-gated clarification ->
- * concrete recovery plans -> durable human approval -> idempotent multi-action execution -> wait for
- * a real Jira event (or a manual re-check) -> re-evaluate -> escalate/replan or close. See
- * ai-service/app/sprint_recovery/graph.py's module docstring for the full design rationale — this is
- * a genuinely different LangGraph shape than epic rollout: 3 differently-shaped pauses (not 1), a
- * conditional replan loop bounded by an escalation cap, and re-entry driven by a real Kafka event as
- * well as by a human.
+ * Sprint recovery: diagnose -> hypotheses -> optional clarification -> plans -> human approval ->
+ * execution -> wait for a Jira event or manual re-check -> re-evaluate -> escalate, replan or close.
+ * See ai-service/app/sprint_recovery/graph.py.
  */
-// 'revising' is transient server-side only (approval_node -> plan_node happens within one HTTP call,
-// same request-response) — included here for structural completeness, never actually observed by a
-// client between calls.
+// 'revising' only exists inside one server call; listed for completeness, never seen by the client.
 export type RecoveryStatus =
   | 'diagnosing' | 'no_risk_found' | 'awaiting_clarification'
   | 'awaiting_plan_approval' | 'committing' | 'committed' | 'waiting_reevaluation' | 'recovered'
@@ -663,22 +657,7 @@ export const aiApi = {
     api.post<PrecedentResponseDto>('/api/ai/link-similar-work-items', {
       spaceIds, issueKey, title, description,
     }),
-  /** Starts the durable Plan Epic lifecycle and pauses server-side at its editable preview. */
-  startRollout: (
-    proposal: string,
-    spaceId: number,
-    existingLabels: string[] = [],
-    sprintCapacityPoints: number | null = null,
-    targetSprintCount: number | null = null,
-  ) =>
-    api.post<RolloutStatusDto>('/api/ai/plan-epic/rollout', {
-      proposal,
-      space_id: spaceId,
-      existing_labels: existingLabels,
-      sprint_capacity_points: sprintCapacityPoints ?? undefined,
-      target_sprint_count: targetSprintCount ?? undefined,
-    }),
-  /** SSE variant of `startRollout` — `onStage` fires once ("generating the rollout plan") since
+  /** SSE version of `POST /plan-epic/rollout` — `onStage` fires once ("generating the rollout plan") since
    *  `plan_node` is the only LLM call this graph makes on start; still worth it since that call is the
    *  entire wait. See ai-service's `POST /plan-epic/rollout/stream`. */
   startRolloutStream: (
@@ -727,11 +706,7 @@ export const aiApi = {
   retryRollout: (threadId: string) =>
     api.post<RolloutStatusDto>(`/api/ai/plan-epic/rollout/${threadId}/retry`),
 
-  /** Starts a sprint-recovery diagnosis workflow. Runs to the first pause — either a clarifying
-   *  question (confidence-gated) or a full set of recovery plans (awaiting_plan_approval). */
-  startSprintRecovery: (spaceId: number, sprintId: number, sprintName: string) =>
-    api.post<RecoveryStatusDto>('/api/ai/sprint-recovery/start', { spaceId, sprintId, sprintName }),
-  /** SSE variant of `startSprintRecovery` — `onStage` fires ("detecting risk signals and analyzing
+  /** SSE version of `POST /sprint-recovery/start` — `onStage` fires ("detecting risk signals and analyzing
    *  evidence", "generating recovery plans") as `diagnose_node`/`plan_node` are reached; a fresh
    *  diagnosis can chain through both in one call. See ai-service's `POST /sprint-recovery/start/stream`. */
   startSprintRecoveryStream: (spaceId: number, sprintId: number, sprintName: string, onStage?: (label: string) => void) =>
@@ -741,7 +716,7 @@ export const aiApi = {
   /** Found live: crash-resume was correct at the graph/API level (same thread_id, /retry picks up
    *  exactly where a killed process left off) but the UI had no way to *discover* that thread_id again
    *  once it was lost from browser memory (modal closed, page reloaded, or the crash itself) —
-   *  `startSprintRecovery(Stream)` always minted a fresh thread. Called on mount, before offering
+   *  `startSprintRecoveryStream` always minted a fresh thread. Called on mount, before offering
    *  "Diagnose Sprint Risk"; null means no non-terminal thread exists for this sprint, not an error. */
   findActiveSprintRecovery: (spaceId: number, sprintId: number) =>
     // The union is intentional rolling-deploy compatibility. Older ai-service versions returned a
@@ -749,27 +724,10 @@ export const aiApi = {
     api.get<ActiveRecoveryLookupDto | RecoveryStatusDto | null>(
       `/api/ai/sprint-recovery/by-sprint?space_id=${spaceId}&sprint_id=${sprintId}`,
     ),
-  /** Answers the one specific clarifying question the confidence gate raised — folded in as evidence,
-   *  loops back into diagnosis (bounded by the server-side max_clarification_rounds). */
-  answerSprintRecoveryClarification: (threadId: string, answer: string) =>
-    api.post<RecoveryStatusDto>(`/api/ai/sprint-recovery/${threadId}/clarify`, { answer }),
   /** SSE variant of `answerSprintRecoveryClarification` — same stage events as the start stream, since
    *  answering can chain straight from `diagnose_node` into `plan_node` again on a confident pass. */
   answerSprintRecoveryClarificationStream: (threadId: string, answer: string, onStage?: (label: string) => void) =>
     consumeStageStream<RecoveryStatusDto>(`/api/ai/sprint-recovery/${threadId}/clarify/stream`, { answer }, onStage),
-  submitSprintRecoveryDecision: (
-    threadId: string,
-    decision: 'approve' | 'edit' | 'reject' | 'revise',
-    planId?: string,
-    actions?: RecoveryActionDto[],
-    feedback?: string,
-  ) =>
-    api.post<RecoveryStatusDto>(`/api/ai/sprint-recovery/${threadId}/decision`, {
-      decision,
-      planId: decision === 'approve' || decision === 'edit' ? planId : undefined,
-      actions: decision === 'edit' ? actions : undefined,
-      feedback: decision === 'revise' ? feedback : undefined,
-    }),
   /** SSE variant of `submitSprintRecoveryDecision` — only `revise` ever emits a `stage` event (it's
    *  the only decision that re-enters `plan_node`, a real LLM call), but every decision goes through
    *  this so the caller has one code path regardless of which button was clicked. */
@@ -792,10 +750,6 @@ export const aiApi = {
    *  to a heterogeneous 4-action-type execution instead of a single homogeneous "create issue" one. */
   retrySprintRecovery: (threadId: string) =>
     api.post<RecoveryStatusDto>(`/api/ai/sprint-recovery/${threadId}/retry`),
-  /** The manual half of the "human or Kafka event, identical resume protocol" wait — a real
-   *  IssueContentChangedEvent calls the same underlying resume from kafka_trigger.py instead. */
-  triggerSprintRecoveryReevaluation: (threadId: string) =>
-    api.post<RecoveryStatusDto>(`/api/ai/sprint-recovery/${threadId}/trigger-reevaluation`),
   /** SSE variant — `reevaluate_node` itself is fast/deterministic, but replanning (when still at
    *  risk and under the escalation cap) chains straight into `plan_node`, a real LLM call worth a
    *  `stage` event for instead of a bare "Checking…" with no feedback. */

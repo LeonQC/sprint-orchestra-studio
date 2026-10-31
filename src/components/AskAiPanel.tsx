@@ -36,17 +36,9 @@ interface ConversationTurn {
   abandoned?: boolean;
 }
 
-/** Renders an ask_clarification turn as a picker: one option per independently plausible source,
- *  plus a free-text fallback for "none of these" — mirrors the suggested-prompt chip's "click to
- *  submit" pattern (`.aa-suggestion`) rather than introducing a new interaction model. Picking an
- *  option or submitting the free-text field both just call `onPick`, which the parent wires to the
- *  SAME `handleSubmit` a normal typed question uses — the choice becomes the next message in
- *  `history`, so the model resolves it in conversational context instead of needing a distinct
- *  "answer to a clarification" endpoint or payload shape.
- *
- *  `interactive` is false for every turn except the latest: an earlier clarification has already
- *  been superseded by whatever the user picked next, and re-rendering it as clickable would let a
- *  stale picker resubmit a question the conversation has moved past. */
+/** Shows an ask_clarification turn as a picker: one button per plausible source plus a free-text
+ *  "none of these". A choice is sent through the normal `handleSubmit`, so it's just the next message
+ *  in `history`. Only the latest turn is `interactive` — an old picker would reopen a settled question. */
 function ClarificationPrompt({
   question,
   options,
@@ -181,7 +173,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
   );
 
   // The most recent turn's own traceParent — sent back as a real header on the NEXT call so that
-  // request's span joins the same trace instead of starting a new one (see aiApi.ask's `traceParent`
+  // request's span joins the same trace instead of starting a new one (see aiApi.askStream's `traceParent`
   // doc comment). Undefined for the very first question, same as `history` being empty; "New chat"
   // resets both the same way, by clearing `conversation`. Abandoned turns are skipped for the same
   // reason they are dropped from `history` — the next question is not a continuation of one.
@@ -201,24 +193,10 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [conversation.length, loading]);
 
-  // Expanding a Sources/Stage-latency/AI-usage disclosure grows content below wherever the thread
-  // happened to be scrolled — the browser does not adjust scroll position on a <details> toggle, so
-  // the newly revealed block (and everything after it, including the composer) can end up pushed
-  // below the visible frame while the block that was JUST opened sits pinned near the top instead
-  // of staying anchored where the user is looking. Confirmed live: after a few turns with any
-  // disclosure expanded, the scroll position the app's own auto-scroll-to-bottom effect had set
-  // becomes stale the moment a <details> opens, since that effect only re-runs on
-  // `[conversation.length, loading]`, not on this.
-  //
-  // Which behavior to use is decided by whether this is the LATEST turn, not by measuring
-  // scroll-distance-to-bottom at toggle time — the browser has already grown `.aa-scroll` to fit
-  // the newly revealed content by the time the native `toggle` event reaches this handler, so a
-  // distance check here measures the post-expansion gap, not the user's actual position beforehand,
-  // and unreliably misses the common case. "Is this the latest turn" needs no timing assumption:
-  // expanding the latest answer's own metadata (the common case right after asking something) keeps
-  // following the true bottom, composer included; expanding an EARLIER turn's metadata (scrolled up
-  // to review history) only brings that box into view — jumping down to unrelated new content would
-  // be a worse surprise than leaving the view exactly where the user just clicked.
+  // A <details> toggle grows content without adjusting scroll, so it can push the composer out of view.
+  // Decide by whether this is the LATEST turn, not by measuring distance to the bottom (the browser has
+  // already grown the container when `toggle` fires): the latest turn keeps following the bottom; an
+  // older turn only scrolls its box into view.
   function makeDetailsToggleHandler(isLatestTurn: boolean) {
     return (e: React.SyntheticEvent<HTMLDetailsElement>) => {
       if (!e.currentTarget.open) return;
@@ -397,14 +375,8 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                           </div>
                         )}
                         {turn.result.needsClarification ? (
-                          // The agent found multiple plausible sources and is asking which one,
-                          // rather than guessing — see ai-service's ask_clarification tool. Picking
-                          // an option (or typing something else) resends it through the SAME
-                          // handleSubmit path a normal question takes: it becomes the next message
-                          // in `history`, so the model resolves it in context rather than needing a
-                          // separate reply mechanism. Only the latest turn gets clickable options —
-                          // an earlier turn's picker answering it now would silently reopen a
-                          // question the conversation has already moved past.
+                          // Clarification picker: the choice is resent through the normal
+                          // handleSubmit as the next message. Only the latest turn is clickable.
                           <ClarificationPrompt
                             question={turn.result.answer}
                             options={turn.result.clarificationOptions ?? []}

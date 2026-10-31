@@ -1,18 +1,6 @@
-/** The AI draft's story-point suggestion in the Create Issue modal, and the rationale that explains
- *  it.
- *
- *  A number on its own is the part people don't trust — "why 5?" is the first question anyone asks
- *  in estimation, so ai-service returns `estimateRationale` alongside `estimateStoryPoints` (null
- *  exactly when the estimate is null, see ai-service/app/drafting/schemas.py) the same way the
- *  Plan Epic path already does for planned issues.
- *
- *  The rule that needs its own module is what happens when the user overrides the number: the
- *  points input stays freely editable (most issues are still created without pressing the AI button
- *  at all), and once someone types a different number the model's sentence no longer explains the
- *  value in the field. Rather than showing a rationale for a number nobody proposed, the suggestion
- *  is matched against the current input and simply falls away when they diverge — and comes back if
- *  the user types the suggested number again, which is the same thing as agreeing with it.
- */
+/** The AI draft's story-point suggestion in Create Issue, and its rationale ("why 5?").
+ *  The points field stays freely editable. Once the user types a different number, the AI's sentence
+ *  no longer explains it, so the suggestion hides; typing the suggested number again brings it back. */
 
 export type DraftEstimate = {
   readonly points: number;

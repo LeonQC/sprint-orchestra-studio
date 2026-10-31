@@ -1,16 +1,7 @@
 /**
- * In-memory, per-tab cache for AI results that cost a real model call.
- *
- * Module-level, not component state, so a result survives closing the popup that produced it (and
- * the ticket modal around it) and reopening later in the same session. That's the whole point: every
- * entry here was paid for, and these modals unmount every time a ticket is closed, so component
- * state alone would silently re-bill an identical request on every reopen.
- *
- * Keyed by `feature` + `key` (usually an issue key) + a content `fingerprint`, so a cached result is
- * only reused while the input it was computed from is unchanged — an edited comment or a rewritten
- * description misses the cache instead of showing a stale answer about text that no longer exists.
- *
- * Lost on a full page reload, same as every other client-only cache in this app.
+ * Per-tab in-memory cache for AI results that cost a model call. Module-level so a result survives
+ * closing and reopening the ticket modal (component state would pay for the same call again). Keyed by
+ * feature + key + a content fingerprint, so edited input misses the cache. Lost on page reload.
  */
 interface CacheEntry<T> {
   fingerprint: string;
