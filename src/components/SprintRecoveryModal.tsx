@@ -319,6 +319,7 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
   const [starting, setStarting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmingStop, setConfirmingStop] = useState(false);
+  const [lastStop, setLastStop] = useState<{ by: string; owner: string | null; at: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [clarifyAnswer, setClarifyAnswer] = useState('');
   const [history, setHistory] = useState<RecoveryCheckpointDto[] | null>(null);
@@ -373,8 +374,12 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
     setState(null);
     setResumedExisting(false);
     setBusyRecovery(null);
+    setLastStop(null);
     try {
       const lookup = normalizeRecoveryLookup(await aiApi.findActiveSprintRecovery(spaceId, sprintId));
+      if (lookup.availability === 'none' && lookup.stoppedBy) {
+        setLastStop({ by: lookup.stoppedBy, owner: lookup.ownerUsername ?? null, at: lookup.stoppedAt ?? null });
+      }
       if (lookup.availability === 'resumable' && lookup.recovery) {
         setState(lookup.recovery);
         setResumedExisting(true);
@@ -680,6 +685,13 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
           )}
           {!state && availability === 'none' && (
             <>
+              {lastStop && (
+                <p className="rl-hint sr-last-stop" role="status">
+                  The last check on this sprint{lastStop.owner ? <>, started by <strong>{lastStop.owner}</strong>,</> : ''} was
+                  stopped by <strong>{lastStop.by}</strong>
+                  {lastStop.at ? ` on ${new Date(lastStop.at).toLocaleString()}` : ''}. Nothing more was written to Jira.
+                </p>
+              )}
               <p className="rl-hint">
                 Checks this sprint for real signs of risk, explains what might be going wrong (every
                 claim is backed by evidence you can inspect), and only makes changes in Jira after you

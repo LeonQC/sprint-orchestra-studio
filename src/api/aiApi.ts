@@ -507,6 +507,9 @@ export interface ActiveRecoveryLookupDto {
    *  the first availability response version. Never includes the private thread id or plan data. */
   ownerUsername?: string | null;
   currentStatus?: RecoveryStatus | null;
+  /** With `none`: the sprint's last check was stopped, by whom and when (ISO time). */
+  stoppedBy?: string | null;
+  stoppedAt?: string | null;
 }
 
 export interface RecoveryEscalationRoundDto {
