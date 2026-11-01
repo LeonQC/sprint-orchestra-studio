@@ -318,6 +318,7 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
   const [resumedExisting, setResumedExisting] = useState(false);
   const [starting, setStarting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmingStop, setConfirmingStop] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clarifyAnswer, setClarifyAnswer] = useState('');
   const [history, setHistory] = useState<RecoveryCheckpointDto[] | null>(null);
@@ -549,6 +550,44 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
     setError(null);
   }
 
+  async function handleStop() {
+    setBusy(true);
+    setError(null);
+    try {
+      await aiApi.stopSprintRecovery(spaceId, sprintId);
+      setConfirmingStop(false);
+      await refreshAvailability();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Stopping can't be undone, so the first click only asks.
+  function renderStopButton(label: string) {
+    return (
+      <button type="button" className="bl-btn bl-btn--ghost" onClick={() => setConfirmingStop(true)} disabled={busy || confirmingStop}>
+        {label}
+      </button>
+    );
+  }
+
+  function renderStopConfirm() {
+    if (!confirmingStop) return null;
+    return (
+      <div className="sr-stop-confirm" role="group" aria-label="Confirm stop">
+        <span className="rl-hint sr-hint-tight">Stop this check? It can't be resumed, and nothing more is written to Jira.</span>
+        <button type="button" className="bl-btn bl-btn--outline" onClick={() => void handleStop()} disabled={busy}>
+          {busy ? 'Stopping…' : 'Yes, stop it'}
+        </button>
+        <button type="button" className="bl-btn bl-btn--ghost" onClick={() => setConfirmingStop(false)} disabled={busy}>
+          Keep it
+        </button>
+      </div>
+    );
+  }
+
   async function handleRetry() {
     if (!state) return;
     await run(() => aiApi.retrySprintRecovery(state.threadId));
@@ -618,7 +657,9 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
                     <dt>Current step</dt>
                     <dd>
                       {busyRecovery?.currentStatus
-                        ? STATUS_LABELS[busyRecovery.currentStatus] ?? busyRecovery.currentStatus.replace(/_/g, ' ')
+                        ? (STATUS_LABELS[busyRecovery.currentStatus] ?? busyRecovery.currentStatus.replace(/_/g, ' '))
+                            // The labels speak to the owner; here the reader is someone else.
+                            .replace('your', busyRecovery.ownerUsername ? `${busyRecovery.ownerUsername}'s` : "the owner's")
                         : 'Recovery is still active'}
                     </dd>
                   </div>
@@ -626,18 +667,22 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
                     <dt>What to do next</dt>
                     <dd>
                       {busyRecovery?.ownerUsername
-                        ? <>Sign in as <strong>{busyRecovery.ownerUsername}</strong> to continue, reject, or stop this workflow.</>
-                        : 'Ask the teammate who started it to continue, reject, or stop the workflow.'}
+                        ? <>Ask <strong>{busyRecovery.ownerUsername}</strong> to continue it, or stop it here to start your own.</>
+                        : 'Ask the teammate who started it to continue it, or stop it here to start your own.'}
                     </dd>
                   </div>
                 </dl>
                 <p className="sr-availability__next">
                   A second check is disabled to prevent overlapping plans or duplicate Jira changes.
                 </p>
+                {renderStopConfirm()}
               </div>
-              <button type="button" className="bl-btn bl-btn--outline" onClick={() => void refreshAvailability()}>
-                Check again
-              </button>
+              <div className="sr-availability__actions">
+                <button type="button" className="bl-btn bl-btn--outline" onClick={() => void refreshAvailability()}>
+                  Check again
+                </button>
+                {renderStopButton('Stop this check')}
+              </div>
             </div>
           )}
           {!state && availability === 'error' && (
@@ -1075,6 +1120,14 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
                   <button type="button" className="bl-btn bl-btn--primary" onClick={handleTriggerReevaluation} disabled={busy}>
                     {busy ? (stageLabel ?? 'Checking…') : 'Re-check now'}
                   </button>
+                </div>
+              )}
+
+              {/* Rejecting a plan covers approval; these are the other places a check can sit. */}
+              {['awaiting_clarification', 'waiting_reevaluation', 'failed', 'committing'].includes(state.status) && (
+                <div className="sr-stop-row">
+                  {renderStopButton('Stop this check')}
+                  {renderStopConfirm()}
                 </div>
               )}
 

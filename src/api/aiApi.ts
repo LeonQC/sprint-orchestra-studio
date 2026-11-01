@@ -724,6 +724,10 @@ export const aiApi = {
     api.get<ActiveRecoveryLookupDto | RecoveryStatusDto | null>(
       `/api/ai/sprint-recovery/by-sprint?space_id=${spaceId}&sprint_id=${sprintId}`,
     ),
+  /** Ends this sprint's unfinished check wherever it is paused, so a new one can start. Any member of
+   *  the space may stop it, not only its owner. */
+  stopSprintRecovery: (spaceId: number, sprintId: number) =>
+    api.post<ActiveRecoveryLookupDto>('/api/ai/sprint-recovery/by-sprint/stop', { spaceId, sprintId }),
   /** SSE variant of `answerSprintRecoveryClarification` — same stage events as the start stream, since
    *  answering can chain straight from `diagnose_node` into `plan_node` again on a confident pass. */
   answerSprintRecoveryClarificationStream: (threadId: string, answer: string, onStage?: (label: string) => void) =>

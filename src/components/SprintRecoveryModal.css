@@ -651,6 +651,29 @@
   background: #fffbeb;
 }
 
+.sr-availability__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.sr-stop-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sr-stop-confirm {
+  display: flex;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .sr-availability--error {
   border-color: #fecaca;
   border-left-color: #ef4444;
