@@ -179,7 +179,7 @@ const STATUS_LABELS: Record<string, string> = {
   awaiting_plan_approval: 'Waiting for your decision',
   committing: 'Applying changes in Jira…',
   committed: 'Changes saved in Jira',
-  waiting_reevaluation: 'Watching for changes',
+  waiting_reevaluation: 'Ready to re-check',
   recovered: 'Fixed ✅',
   escalated: 'Needs a human decision',
   rejected: 'Stopped',
@@ -194,7 +194,7 @@ const STATUS_DESCRIPTIONS: Record<string, string> = {
   awaiting_plan_approval: 'A recovery plan is ready. Review the choices below; Jira will not change until you approve one.',
   committing: 'Applying only the recovery action you approved in Jira.',
   committed: 'The approved recovery action was saved in Jira.',
-  waiting_reevaluation: 'The approved change is in Jira. The workflow is waiting to see whether sprint risk improves.',
+  waiting_reevaluation: 'The approved change is in Jira. Re-check to see whether sprint risk improved.',
   recovered: 'The latest check shows that the sprint is back on track.',
   escalated: 'The workflow needs a person to decide what happens next. The reason and prior attempts are shown below.',
   rejected: 'This recovery run was stopped. It will not make any more changes in Jira.',
@@ -298,7 +298,7 @@ interface SprintRecoveryModalProps {
 /**
  * A durable sprint-risk diagnosis + recovery workflow — genuinely different LangGraph shape from
  * RolloutModal: three differently-shaped pauses (a free-text clarifying question, a plan
- * approve/edit/reject, and a wait resumable by either a human or a real Kafka event), a bounded
+ * approve/edit/reject, and a wait before re-checking the sprint), a bounded
  * escalation replan loop, and a time-travel picker. See
  * ai-service/app/sprint_recovery/graph.py's module docstring for the full design rationale — none of
  * this is "impossible without a framework," it's where the honest case for using one anyway is
@@ -431,28 +431,6 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
       rewindPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [selectedCheckpoint]);
-
-  // While the workflow is parked at `waiting_reevaluation`, something *other than this browser tab*
-  // can move it forward: `kafka_trigger.py` resumes that exact pause when a relevant Jira change is
-  // published. Found live — and it fires far more often than expected, because the workflow's own
-  // approved actions (change_priority / add_comment / move_out_of_sprint) are themselves Jira changes
-  // that get published. Without this poll the modal sat on a stale "Re-check now" button whose click
-  // then hit a workflow that had already moved on. Polling is the right shape here rather than a
-  // second SSE stream: it's one cheap GET every few seconds, only while parked at this one state.
-  useEffect(() => {
-    if (state?.status !== 'waiting_reevaluation' || busy) return;
-    const threadId = state.threadId;
-    let cancelled = false;
-    const id = window.setInterval(async () => {
-      try {
-        const latest = await aiApi.getSprintRecoveryStatus(threadId);
-        if (!cancelled && latest.status !== 'waiting_reevaluation') setState(latest);
-      } catch {
-        /* transient — the next tick retries, and the manual button is still there as a fallback */
-      }
-    }, 3000);
-    return () => { cancelled = true; window.clearInterval(id); };
-  }, [state?.status, state?.threadId, busy]);
 
   async function run(fn: () => Promise<RecoveryStatusDto>) {
     setBusy(true);
@@ -1109,8 +1087,8 @@ export function SprintRecoveryModal({ spaceId, sprintId, sprintName, onClose }: 
               {state.status === 'waiting_reevaluation' && (
                 <div ref={reevaluateSectionRef} className="sr-reevaluate-anchor">
                   <p className="rl-hint sr-hint-tight">
-                    This checks again automatically if something relevant changes in Jira — or you can
-                    check right now.
+                    The changes are in Jira. Re-check whenever you want to see whether the sprint is
+                    still at risk.
                   </p>
                   {busy && (
                     <span className="sr-waiting sr-waiting--local">
