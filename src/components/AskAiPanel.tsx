@@ -3,7 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSpaces } from '../context/SpaceContext';
 import { aiApi } from '../api';
-import type { AskResponseDto, ChatTurnDto, ClarificationOptionDto } from '../api';
+import type {
+  AskMode, AskResponseDto, ChatTurnDto, ClarificationOptionDto, HistorySummaryDto, ModelUsageDto,
+} from '../api';
 import { IssueKeyChip } from './IssueKeyChip';
 import { AiUsageCard } from './AiUsageCard';
 import { AnswerFeedback } from './AnswerFeedback';
@@ -23,6 +25,33 @@ const SUGGESTED_PROMPTS = [
   "What's the current sprint's goal?",
   'How many bugs are still open?',
 ];
+
+/** What each answer mode means, shown under the picker. Deep costs more, so that is stated before the
+ *  click, not found out after the wait. */
+const MODE_OPTIONS: { value: AskMode; label: string; hint: string }[] = [
+  {
+    value: 'fast',
+    label: 'Fast',
+    hint: 'One search agent looks through all the selected spaces. Quickest and cheapest.',
+  },
+  {
+    value: 'deep',
+    label: 'Deep investigation',
+    hint: 'If your question compares spaces, one agent per space searches on its own and the results '
+      + 'are combined and checked. That is slower (about 2x) and costs about 2x more. Other '
+      + 'questions are still answered by one agent.',
+  },
+];
+
+const USAGE_ROLE_TITLES: Record<ModelUsageDto['role'], string> = {
+  router: 'Router',
+  answer_agent: 'Answer agent',
+  mode_router: 'Fast or deep choice',
+  history_summary: 'Chat summary',
+};
+
+/** Deep starts one agent per space, and only up to this many (ai-service's max_multi_spaces). */
+const MAX_DEEP_SPACES = 3;
 
 /** One exchange in the running conversation — the question as asked, plus the full response (so
  *  citations/abstained render per-turn, not just the latest one). */
@@ -138,6 +167,9 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
   const [query, setQuery] = useState('');
   const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<string>>(() => new Set(spaces.map((s) => s.id)));
   const [loading, setLoading] = useState(false);
+  // Fast by default: deep investigation costs about twice as much and did not answer more accurately
+  // in our evals, so it is something you ask for, not something you get by accident.
+  const [mode, setMode] = useState<AskMode>('fast');
   // The question currently in flight, shown as its own bubble above the loading indicator while
   // waiting — `query` alone can't serve this: a suggested-prompt chip submits via `explicitQuestion`
   // without ever touching `query`, and `query` isn't cleared until the request actually succeeds, so
@@ -167,7 +199,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
       .filter((t) => !t.abandoned)  // a skipped clarification is not context for the next question
       .flatMap((t): ChatTurnDto[] => [
         { role: 'user', content: t.question },
-        { role: 'assistant', content: t.result.answer },
+        { role: 'assistant', content: t.result.answer, clarification: !!t.result.needsClarification },
       ]),
     [conversation],
   );
@@ -178,6 +210,14 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
   // resets both the same way, by clearing `conversation`. Abandoned turns are skipped for the same
   // reason they are dropped from `history` — the next question is not a continuation of one.
   const lastTraceParent = conversation.filter((t) => !t.abandoned).at(-1)?.result.traceParent;
+
+  // The latest summary of this chat's earlier turns, sent back so ai-service never summarizes the
+  // same turns twice. Abandoned turns count too: a summary never covers the turn it was written on,
+  // and only the newest turn can be abandoned, so the turns it covers are still in `history`.
+  const historySummary: HistorySummaryDto | undefined = conversation
+    .map((t) => t.result.historySummary)
+    .filter((s): s is HistorySummaryDto => !!s)
+    .at(-1);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -235,6 +275,8 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
       const result = await aiApi.askStream(
         question, spaceIds, history, setStageLabel, lastTraceParent,
         (t) => setStreamingText((prev) => prev + t),
+        mode,
+        historySummary,
       );
       setConversation((prev) => [...prev, { question, result }]);
       setQuery('');
@@ -311,6 +353,32 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                 })}
               </div>
             </div>
+            <div className="aa-scope">
+              <span className="aa-scope__label">Mode</span>
+              <div className="aa-scope__pills">
+                {MODE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`aa-scope__pill${mode === option.value ? ' aa-scope__pill--active' : ''}`}
+                    aria-pressed={mode === option.value}
+                    disabled={loading}
+                    onClick={() => setMode(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className={`aa-mode-hint${mode === 'deep' ? ' aa-mode-hint--warn' : ''}`}>
+              {MODE_OPTIONS.find((o) => o.value === mode)?.hint}
+            </p>
+            {mode === 'deep' && spaceIds.length > MAX_DEEP_SPACES && (
+              <p className="aa-mode-hint aa-mode-hint--warn">
+                You selected {spaceIds.length} spaces. Deep investigation covers up to {MAX_DEEP_SPACES},
+                so one search agent will answer. Deselect some spaces to use it.
+              </p>
+            )}
           </div>
 
           {/* Scrollable message thread, ChatGPT-style — the composer below stays fixed while this
@@ -372,6 +440,27 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                                 · {formatDuration(turn.result.stageTimings.totalMs)}
                               </span>
                             )}
+                          </div>
+                        )}
+                        {turn.result.executionMode === 'multi' && (
+                          <div className="aa-mode-badge" title={turn.result.modeRouteReason}>
+                            Several search agents were used · one per space
+                          </div>
+                        )}
+                        {turn.result.executionMode === 'single'
+                          && turn.result.modeRouteSource !== undefined
+                          && ['rule', 'model', 'fallback'].includes(turn.result.modeRouteSource)
+                          && turn.result.modeRouteReason && (
+                          // Deep was on but one agent answered: say why, so the answer is never
+                          // mistaken for a deep one. Fast never reaches here (its source is "user").
+                          <div className="aa-mode-badge aa-mode-badge--note">
+                            Answered by one search agent: {turn.result.modeRouteReason}
+                          </div>
+                        )}
+                        {turn.result.historySummary && (
+                          <div className="aa-mode-badge aa-mode-badge--note">
+                            This chat is long, so its earlier questions were summarized. The
+                            latest answer is still read in full.
                           </div>
                         )}
                         {turn.result.needsClarification ? (
@@ -457,7 +546,7 @@ export function AskAiPanel({ onClose }: AskAiPanelProps) {
                                 <AiUsageCard
                                   key={`${usage.role}-${usage.provider}-${usage.model}`}
                                   compact
-                                  title={usage.role === 'router' ? 'Router' : 'Answer agent'}
+                                  title={USAGE_ROLE_TITLES[usage.role]}
                                   description={`${usage.provider} · ${usage.model} · ${usage.deployment === 'local' ? 'Local' : 'Hosted API'}`}
                                   inputTokens={usage.inputTokens}
                                   outputTokens={usage.outputTokens}

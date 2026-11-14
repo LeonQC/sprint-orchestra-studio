@@ -163,6 +163,8 @@ export interface CitationDto {
 export interface ChatTurnDto {
   role: 'user' | 'assistant';
   content: string;
+  /** True on an assistant turn that was a clarifying question, so the service asks at most once. */
+  clarification?: boolean;
 }
 
 /** Server-measured wall-clock split for one /ask(/stream) call — see ai-service's `StageTimingsOut`
@@ -176,7 +178,7 @@ export interface StageTimingsDto {
 }
 
 export interface ModelUsageDto {
-  role: 'router' | 'answer_agent';
+  role: 'router' | 'answer_agent' | 'mode_router' | 'history_summary';
   provider: string;
   model: string;
   deployment: 'local' | 'hosted';
@@ -188,6 +190,18 @@ export interface ModelUsageDto {
   cachedInputTokens?: number;
   estimatedCostUsd: number;
   pricingStatus: 'free_local' | 'estimated' | 'unavailable';
+}
+
+/** fast: one search agent. deep: the server may use one agent per space when the question compares
+ *  spaces (slower, about 2x the cost); otherwise it still answers with one. */
+export type AskMode = 'fast' | 'deep';
+
+/** A summary of a long chat's earlier turns, written by ai-service. It comes back on the answer
+ *  that wrote it and is sent with every later question in that chat, so it is written only once. */
+export interface HistorySummaryDto {
+  text: string;
+  /** How many history turns, counted from the start of the chat, the summary stands in for. */
+  coversTurns: number;
 }
 
 export interface ClarificationOptionDto {
@@ -222,6 +236,13 @@ export interface AskResponseDto {
   modelUsage?: ModelUsageDto[];
   routeSource?: 'keyword' | 'model' | 'fallback';
   routeTool?: string;
+  /** Which path answered: one search agent, or deep investigation (one agent per space). */
+  executionMode?: 'single' | 'multi';
+  /** "user" = you picked Fast; "model" = the router chose; "rule"/"fallback" = Deep could not use several agents. */
+  modeRouteSource?: 'disabled' | 'rule' | 'model' | 'fallback' | 'user';
+  modeRouteReason?: string;
+  /** Set only on the answer whose request summarized the earlier turns. */
+  historySummary?: HistorySummaryDto | null;
   cacheHit: boolean;
   stageTimings?: StageTimingsDto;
   /** A W3C `traceparent` naming this call's own entrypoint span (see ai-service's
@@ -629,9 +650,13 @@ export const aiApi = {
     question: string, spaceIds: number[], history: ChatTurnDto[] = [],
     onStage?: (label: string) => void, traceParent?: string,
     onToken?: (text: string) => void,
+    mode: AskMode = 'fast',
+    historySummary?: HistorySummaryDto,
   ) =>
     consumeStageStream<AskResponseDto>(
-      '/api/ai/ask/stream', { question, space_ids: spaceIds, history }, onStage,
+      '/api/ai/ask/stream',
+      { question, space_ids: spaceIds, history, mode, history_summary: historySummary ?? null },
+      onStage,
       traceParent ? { traceparent: traceParent } : undefined,
       onToken,
     ),
@@ -668,8 +693,8 @@ export const aiApi = {
     spaceId: number,
     /** One per requirement. Each is searched for separately server-side, so an issue written for a
      *  requirement is sized against the past work resembling that piece rather than the epic average.
-     *  Empty keeps the previous whole-proposal behaviour. */
-    requirements: string[] = [],
+     *  At least one nonblank requirement is required to start a plan. */
+    requirements: string[],
     existingLabels: string[] = [],
     sprintCapacityPoints: number | null = null,
     targetSprintCount: number | null = null,

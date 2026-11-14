@@ -869,3 +869,37 @@
   text-transform: none;
   letter-spacing: 0;
 }
+
+.aa-mode-hint {
+  margin: 0;
+  font-size: 0.74rem;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.aa-mode-hint--warn {
+  color: #b45309;
+}
+
+.aa-mode-badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #4338ca;
+  background: #eef2ff;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.aa-mode-badge--note {
+  color: #64748b;
+  background: #f1f5f9;
+  font-weight: 500;
+}
+
+.aa-scope__pill:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
