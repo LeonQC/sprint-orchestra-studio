@@ -70,12 +70,16 @@ export function nextManualTempId(existingTempIds: Iterable<string>, currentCount
  *
  *  Tolerant on purpose. People paste from a doc or a ticket and the leading "- ", "* " or "1. " comes
  *  with them; keeping those would put them into the retrieval query, where a bullet character is
- *  noise the embedding has to average away. Blank lines are dropped rather than sent as empty
- *  requirements, which the server would ignore anyway but which would throw the 1-based numbering the
- *  plan cites back off by one. */
+ *  noise the embedding has to average away. Blank lines are dropped before API validation so
+ *  every submitted entry is nonblank and requirement numbering stays contiguous. */
 export function parsedRequirements(text: string): string[] {
   return text
     .split('\n')
     .map((line) => line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, '').trim())
     .filter((line) => line.length > 0);
+}
+
+/** A proposal and at least one nonblank requirement are needed before starting a plan. */
+export function hasPlanEpicInputs(proposal: string, requirementsText: string): boolean {
+  return proposal.trim().length > 0 && parsedRequirements(requirementsText).length > 0;
 }

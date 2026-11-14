@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   hasCompleteBucketLayout,
+  hasPlanEpicInputs,
   isValidStoryPoint,
   MAX_SPRINT_NAME_LENGTH,
   needsExtraSprintAcceptance,
@@ -93,4 +94,11 @@ test('parsedRequirements: a hyphen inside the text survives', () => {
     parsedRequirements('Support multi-currency pricing - including refunds'),
     ['Support multi-currency pricing - including refunds'],
   );
+});
+
+test('plan generation requires a proposal and meaningful requirement text', () => {
+  assert.equal(hasPlanEpicInputs('Bulk price updates', ''), false);
+  assert.equal(hasPlanEpicInputs('Bulk price updates', '   \n - \n1. \n•'), false);
+  assert.equal(hasPlanEpicInputs('   ', 'Only sellers can update prices'), false);
+  assert.equal(hasPlanEpicInputs('Bulk price updates', '\n - Only sellers can update prices \n'), true);
 });

@@ -13,6 +13,7 @@ import type {
 } from '../api';
 import {
   hasCompleteBucketLayout,
+  hasPlanEpicInputs,
   isValidStoryPoint,
   needsExtraSprintAcceptance,
   nextManualTempId,
@@ -721,7 +722,11 @@ export function PlanEpicModal({ spaceId, sprints, onCommitted, onClose }: PlanEp
   }, [spaceId]);
 
   async function handleGenerate() {
-    if (!proposal.trim() || genLoading) return;
+    if (genLoading) return;
+    if (!hasPlanEpicInputs(proposal, requirementsText)) {
+      setGenError('Enter a proposal and at least one requirement before generating a plan.');
+      return;
+    }
     setGenLoading(true);
     setGenError(null);
     setStageLabel(null);
@@ -1040,11 +1045,13 @@ function finalEditedPlan() {
                 autoFocus
               />
               <label className="bl-modal__label" htmlFor="pe-requirements">
-                Requirements <span className="pe-label-hint">one per line — optional, but this is what
-                gets matched against past work</span>
+                Requirements <span className="pe-label-hint">required — one per line; describe what the
+                feature must deliver and any constraints</span>
               </label>
               <AutoGrowTextarea
                 id="pe-requirements"
+                required
+                aria-required="true"
                 className="bl-modal__input pe-textarea"
                 placeholder={'e.g.\nAn admin uploads a spreadsheet and the import runs in the background\nEvery row is validated before anything is created, and bad rows are reported\nOnly authorized admins can start an import'}
                 value={requirementsText}
@@ -1569,7 +1576,7 @@ function finalEditedPlan() {
                 type="button"
                 className="bl-btn bl-btn--primary"
                 onClick={handleGenerate}
-                disabled={!proposal.trim() || genLoading}
+                disabled={!hasPlanEpicInputs(proposal, requirementsText) || genLoading}
               >
                 {genLoading ? 'Generating…' : 'Generate plan'}
               </button>
