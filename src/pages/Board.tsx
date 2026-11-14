@@ -213,7 +213,7 @@ function percentageBreakdown(counts: [number, number, number]): [number, number,
 
   const exact = counts.map((count) => (count / total) * 100);
   const roundedDown = exact.map(Math.floor);
-  let remaining = 100 - roundedDown.reduce((sum, value) => sum + value, 0);
+  const remaining = 100 - roundedDown.reduce((sum, value) => sum + value, 0);
   const remainderOrder = exact
     .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
     .sort((a, b) => b.fraction - a.fraction || a.index - b.index);

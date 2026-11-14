@@ -1529,7 +1529,9 @@ export function TicketDetailModal({
       const next = [key, ...prev.filter((x) => x !== key)].slice(0, 20);
       try {
         localStorage.setItem(LINK_RECENT_KEYS_STORAGE, JSON.stringify(next));
-      } catch {}
+      } catch {
+        // Private mode or full storage: the recent list just isn't remembered.
+      }
       return next;
     });
     setDraft((prev) => ({
@@ -2028,7 +2030,9 @@ export function TicketDetailModal({
       const next = [candidate.id, ...prev.filter((x) => x !== candidate.id)].slice(0, 20);
       try {
         localStorage.setItem(LINK_RECENT_KEYS_STORAGE, JSON.stringify(next));
-      } catch {}
+      } catch {
+        // Private mode or full storage: the recent list just isn't remembered.
+      }
       return next;
     });
   }
