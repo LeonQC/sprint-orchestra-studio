@@ -41,5 +41,4 @@ export const feedbackApi = {
     api.get<FeedbackList>(`/api/ai-feedback?${new URLSearchParams({ ...params, page: String(params.page) })}`),
   detail: (id: string) => api.get<FeedbackDetail>(`/api/ai-feedback/${id}`),
   review: (id: string, body: FeedbackReview) => api.put<FeedbackDetail>(`/api/ai-feedback/${id}`, body),
-  exportCase: (id: string) => api.getBlob(`/api/ai-feedback/${id}/export`),
 };

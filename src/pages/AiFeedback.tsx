@@ -113,11 +113,9 @@ function ReviewForm({ detail, onSaved, onReload }: { detail: FeedbackDetail; onS
   const [keys, setKeys] = useState(detail.requiredIssueKeys.join(', '));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [conflict, setConflict] = useState(false);
   const response = detail.snapshot.response;
   const dirty = status !== detail.status || rootCause !== detail.rootCause || reviewNote !== detail.reviewNote || expectedAnswer !== detail.expectedAnswer || keys !== detail.requiredIssueKeys.join(', ');
-  const canExport = ['reviewing', 'resolved'].includes(detail.status) && !!detail.rootCause && !!detail.expectedAnswer && !dirty;
 
   async function save() {
     setBusy(true); setError(''); setConflict(false);
@@ -126,17 +124,6 @@ function ReviewForm({ detail, onSaved, onReload }: { detail: FeedbackDetail; onS
         requiredIssueKeys: keys.split(/[\s,]+/).filter(Boolean), revision: detail.revision });
       onSaved(result);
     } catch (e) { setError(message(e)); setConflict(e instanceof ApiError && e.status === 409); }
-    finally { setBusy(false); }
-  }
-  async function exportCase() {
-    setBusy(true); setError('');
-    try {
-      const blob = await feedbackApi.exportCase(detail.id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = url; link.download = `feedback-${detail.id}.json`;
-      link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNotice('Case exported. Review the source data before adding it to your test suite.');
-    } catch (e) { setError(message(e)); }
     finally { setBusy(false); }
   }
 
@@ -155,13 +142,11 @@ function ReviewForm({ detail, onSaved, onReload }: { detail: FeedbackDetail; onS
       <div className="feedback-review-title"><h2>Review</h2><span>{dirty ? 'Unsaved changes' : `Saved · ${date(detail.updatedAt)}`}</span></div>
       <div className="feedback-form-grid"><label>Status<select aria-label="Review status" value={status} disabled={busy} onChange={e => setStatus(e.target.value as FeedbackStatus)}>{Object.entries(feedbackStatuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Root cause<select aria-label="Root cause" value={rootCause} disabled={busy} onChange={e => setRootCause(e.target.value)}><option value="">Not classified</option>{Object.entries(feedbackCauses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
       <label>Review notes<textarea rows={3} maxLength={8000} value={reviewNote} disabled={busy} placeholder="What did you find? What was changed or verified?" onChange={e => setReviewNote(e.target.value)} /></label>
-      <label>Expected answer<textarea rows={3} maxLength={12000} value={expectedAnswer} disabled={busy} placeholder="Describe the verified answer or behavior to preserve in a test." onChange={e => setExpectedAnswer(e.target.value)} /></label>
+      <label>Expected answer<textarea rows={3} maxLength={12000} value={expectedAnswer} disabled={busy} placeholder="Describe the correct answer, verified against the source." onChange={e => setExpectedAnswer(e.target.value)} /></label>
       <label>Required issue keys <span className="feedback-optional">(optional)</span><input value={keys} disabled={busy} maxLength={5100} placeholder="ATC-123, ATC-124" onChange={e => setKeys(e.target.value)} /></label>
       {error && <p className="feedback-error" role="alert">{error}</p>}
       {conflict && <button type="button" className="feedback-button" onClick={onReload}>Discard draft and load latest review</button>}
-      {notice && <p className="feedback-notice" role="status">{notice}</p>}
-      <div className="feedback-form-actions"><button type="button" className="feedback-button" disabled={busy || !canExport} onClick={() => void exportCase()}>Export test case</button><button type="submit" className="feedback-button feedback-button--primary" disabled={busy || !dirty}>{busy ? 'Working…' : 'Save review'}</button></div>
-      <p className="feedback-help">To export, save an in-review or resolved item with a root cause and a verified expected answer. Exporting creates a test candidate; it does not run a test.</p>
+      <div className="feedback-form-actions"><button type="submit" className="feedback-button feedback-button--primary" disabled={busy || !dirty}>{busy ? 'Working…' : 'Save review'}</button></div>
     </form>
   </div>;
 }
