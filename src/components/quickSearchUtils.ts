@@ -183,7 +183,7 @@ export function hitKey(hit: SearchResultDto, index: number): string {
 /**
  * The snippet to render for a hit. Under "Exact only" prefer `exactSnippet`, which is built around
  * the literal occurrence, so the highlighted text is always what the user actually typed — the
- * default `snippet` comes from ts_headline and highlights the matched stem ("payment" for a search
+ * default `snippet` comes from the search highlighter and marks the matched stem ("payment" for a search
  * on "payments"), which reads as a broken filter even when the row is a genuine exact hit.
  */
 export function snippetFor(hit: SearchResultDto, exactOnly: boolean): string {

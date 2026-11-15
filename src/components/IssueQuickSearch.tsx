@@ -53,8 +53,7 @@ type CombinedItem =
   | { kind: 'remote'; hit: SearchResultDto };
 
 /**
- * The backend wraps matched terms in literal "<b>"/"</b>" (Postgres `ts_headline`
- * defaults). Snippets come from user-authored issue/comment text, so they must never
+ * The backend wraps matched terms in literal "<b>"/"</b>". Snippets come from user-authored issue/comment text, so they must never
  * be interpreted as HTML — split on the literal markers and render everything as text
  * nodes instead of using dangerouslySetInnerHTML.
  */

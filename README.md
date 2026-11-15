@@ -25,6 +25,7 @@ npm run dev                  # http://localhost:5173
 | `npm run preview` | Serve `dist/` locally |
 | `npm run lint` | ESLint |
 | `npm run test:ui` | Unit tests in `tests/` |
+| `npm run test:plan-epic` | Only the Plan Epic utility tests |
 
 ## API routing
 

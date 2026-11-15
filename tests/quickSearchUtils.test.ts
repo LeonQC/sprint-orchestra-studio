@@ -212,7 +212,7 @@ test('keys stay unique without resultId (older backend), falling back to positio
 test('under "Exact only" the literal snippet wins, so the highlight is what was typed', () => {
   const h = {
     ...hit('ATC-80', true),
-    snippet: 'protecting the <b>payment</b> sandbox',        // ts_headline highlights the STEM
+    snippet: 'protecting the <b>payment</b> sandbox',        // the highlighter marks the STEM
     exactSnippet: '…and fixture <b>payments</b>.',            // literal occurrence
   } as SearchResultDto;
   assert.equal(snippetFor(h, true), '…and fixture <b>payments</b>.');

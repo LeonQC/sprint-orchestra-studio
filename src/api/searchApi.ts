@@ -7,7 +7,7 @@ export interface SearchResultDto {
    *  several comment hits). Optional so a rolling deploy against an older backend still parses. */
   resultId?: number;
   /** Which search tier produced this hit — exact issue-key, stemmed full-text, literal substring,
-   *  or trigram fuzzy fallback. */
+   *  or fuzzy fallback. */
   matchType: 'EXACT_KEY' | 'FULL_TEXT' | 'SUBSTRING' | 'FUZZY';
   spaceId: number;
   issueId: number;
@@ -25,7 +25,7 @@ export interface SearchResultDto {
   exactMatch?: boolean;
   /** Snippet built around the LITERAL occurrence (same `<b>` markers as `snippet`), present exactly
    *  when `exactMatch` is true. Shown instead of `snippet` under "Exact only", because `snippet`
-   *  comes from ts_headline and highlights the matched STEM — bolding "payment" for a search on
+   *  comes from the search highlighter and marks the matched STEM — bolding "payment" for a search on
    *  "payments" makes a correct exact hit look like a broken filter. */
   exactSnippet?: string | null;
   updatedAt: string;
