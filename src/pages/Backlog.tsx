@@ -1,14 +1,19 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { TicketDetailModal } from '../components/TicketDetailModal';
 import type { IssueType, Ticket, TicketStatus } from '../types/ticket';
-import { LABEL_COLORS, labelsForIssueType } from '../types/ticket';
+import { labelColor, labelsForIssueType } from '../types/ticket';
 import type { Sprint, SprintStatus, SprintReorderAction } from '../types/sprint';
 import { BoardAssigneeFilter } from '../components/BoardAssigneeFilter';
 import { CompleteSprintModal } from '../components/CompleteSprintModal';
+import { PlanEpicModal } from '../components/PlanEpicModal';
+import { SprintRecoveryModal } from '../components/SprintRecoveryModal';
+import { SprintPaceModal } from '../components/SprintPaceModal';
 import { IssueFilterPanel } from '../components/IssueFilterPanel';
+import { Tooltip, TooltipExplainer } from '../components/Tooltip';
+import { SPRINT_PACE_HELP, SPRINT_RECOVERY_HELP } from '../utils/sprintAiHelp';
 import { useCurrentUser } from '../context/UserContext';
 import { useSpaces } from '../context/SpaceContext';
 import { effectiveSpaceMemberIds } from '../types/space';
@@ -27,6 +32,8 @@ import {
   withMatchedParents,
 } from '../utils/issueFilters';
 import { getDirectChildren, isSubtask } from '../utils/ticketHierarchy';
+import { computeSprintPaceStats } from '../utils/sprintPaceStats';
+import { bindInlineIssueToSprint, parseInlineStoryPoints } from '../utils/inlineIssueCreate';
 import './Backlog.css';
 
 /** Jira-style: epics are never sprint-scoped in the UI; they always bucket with backlog. */
@@ -131,19 +138,30 @@ function TicketRow({ ticket, onClick, nested, foldable, subtasksExpanded, onTogg
   const statusColor = STATUS_COLORS[ticket.status];
   const assignees = ticket.assignees ?? (ticket.assignee ? [ticket.assignee] : []);
   const displayLabels = labelsForIssueType(ticket.issueType, ticket.labels);
+
+  /**
+   * Real <a> (via Link) so right-click / Cmd-click / middle-click give the browser's
+   * native "open in new tab". Only intercept plain-left-clicks to keep the existing
+   * in-app modal behavior; everything else is left to the browser.
+   */
+  function handleLinkClick(e: React.MouseEvent) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    onClick();
+  }
+
   return (
-    <div
+    <Link
+      to={`/ticket/${ticket.id}`}
       className={`bl-row ${nested ? 'bl-row--nested' : ''}`}
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => e.key === 'Enter' && onClick()}
+      onClick={handleLinkClick}
     >
       {!nested && foldable && onToggleFold ? (
         <button
           type="button"
           className="bl-row__fold"
           onClick={(e) => {
+            e.preventDefault();
             e.stopPropagation();
             onToggleFold();
           }}
@@ -166,7 +184,7 @@ function TicketRow({ ticket, onClick, nested, foldable, subtasksExpanded, onTogg
       <span className="bl-row__title">{ticket.title}</span>
       <span className="bl-row__labels">
         {displayLabels.slice(0, 2).map((l) => (
-          <span key={l} className="bl-row__label" style={{ background: LABEL_COLORS[l].bg, color: LABEL_COLORS[l].text }}>{l}</span>
+          <span key={l} className="bl-row__label" style={{ background: labelColor(l).bg, color: labelColor(l).text }}>{l}</span>
         ))}
         {displayLabels.length > 2 && (
           <span className="bl-row__label bl-row__label--more" title={displayLabels.slice(2).join(', ')}>
@@ -184,7 +202,7 @@ function TicketRow({ ticket, onClick, nested, foldable, subtasksExpanded, onTogg
         {assignees.length > 0 ? assignees.map((a) => <Avatar key={a} name={a} />) : <span className="bl-row__unassigned">—</span>}
       </span>
       <span className="bl-row__points">{ticket.storyPoints ?? <span style={{ opacity: 0.3 }}>—</span>}</span>
-    </div>
+    </Link>
   );
 }
 
@@ -224,17 +242,22 @@ function TicketRowWithSubtasks({
 /* ─── Inline create row ─── */
 
 interface InlineCreateProps {
-  onSave: (title: string) => void;
+  onSave: (title: string, storyPoints?: number) => void;
   onCancel: () => void;
+  requirePoints?: boolean;
 }
 
-function InlineCreate({ onSave, onCancel }: InlineCreateProps) {
+function InlineCreate({ onSave, onCancel, requirePoints = false }: InlineCreateProps) {
   const [value, setValue] = useState('');
+  const [points, setPoints] = useState('');
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
 
   function handleSave() {
-    if (value.trim()) onSave(value.trim());
+    const parsedPoints = parseInlineStoryPoints(points);
+    if (value.trim() && (!requirePoints || parsedPoints !== undefined)) {
+      onSave(value.trim(), requirePoints ? parsedPoints : undefined);
+    }
   }
 
   return (
@@ -250,7 +273,30 @@ function InlineCreate({ onSave, onCancel }: InlineCreateProps) {
           if (e.key === 'Escape') onCancel();
         }}
       />
-      <button type="button" className="bl-btn bl-btn--primary" onClick={handleSave} disabled={!value.trim()}>Create</button>
+      {requirePoints && (
+        <input
+          className="bl-inline-create__points"
+          type="number"
+          min="1"
+          step="1"
+          placeholder="Points"
+          aria-label="Story points"
+          value={points}
+          onChange={(event) => setPoints(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') handleSave();
+            if (event.key === 'Escape') onCancel();
+          }}
+        />
+      )}
+      <button
+        type="button"
+        className="bl-btn bl-btn--primary"
+        onClick={handleSave}
+        disabled={!value.trim() || (requirePoints && parseInlineStoryPoints(points) === undefined)}
+      >
+        Create
+      </button>
       <button type="button" className="bl-btn bl-btn--ghost" onClick={onCancel}>Cancel</button>
     </div>
   );
@@ -260,14 +306,19 @@ function InlineCreate({ onSave, onCancel }: InlineCreateProps) {
 
 interface StartSprintModalProps {
   sprint: Sprint;
+  tickets: Ticket[];
   allSprints: Sprint[];
   onConfirm: (updates: Pick<Sprint, 'startDate' | 'endDate' | 'goal'>) => void;
   onClose: () => void;
 }
 
-function StartSprintModal({ sprint, allSprints, onConfirm, onClose }: StartSprintModalProps) {
-  const today = new Date().toISOString().slice(0, 10);
-  const twoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+function StartSprintModal({ sprint, tickets, allSprints, onConfirm, onClose }: StartSprintModalProps) {
+  const toLocalIsoDate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = toLocalIsoDate(new Date());
+  const twoWeeksDate = new Date();
+  twoWeeksDate.setDate(twoWeeksDate.getDate() + 14);
+  const twoWeeks = toLocalIsoDate(twoWeeksDate);
   const [startDate, setStartDate] = useState(sprint.startDate || today);
   const [endDate, setEndDate] = useState(sprint.endDate || twoWeeks);
   const [goal, setGoal] = useState(sprint.goal ?? '');
@@ -280,6 +331,14 @@ function StartSprintModal({ sprint, allSprints, onConfirm, onClose }: StartSprin
   }, [onClose]);
 
   function handleStart() {
+    const missingPoints = tickets.filter((ticket) =>
+      ticket.issueType !== 'epic'
+      && ticket.issueType !== 'subtask'
+      && !(ticket.storyPoints != null && ticket.storyPoints > 0));
+    if (missingPoints.length > 0) {
+      setError(`Add story points before starting: ${missingPoints.map((ticket) => ticket.id).join(', ')}`);
+      return;
+    }
     const dateErr = validateSprintDates(startDate, endDate);
     if (dateErr) { setError(dateErr); return; }
     const active = activeSprintInSpace(allSprints, sprint.id);
@@ -562,6 +621,8 @@ interface SprintSectionProps {
   onToggle: () => void;
   onStartSprint: () => void;
   onCompleteSprint: () => void;
+  onPaceCheck?: () => void;
+  onRecoveryCheck?: () => void;
   onEditSprint: () => void;
   onDeleteSprint: () => void;
   onReorderSprint?: (action: SprintReorderAction) => void;
@@ -572,9 +633,10 @@ interface SprintSectionProps {
   onCreateIssue: () => void;
   onTicketClick: (id: string) => void;
   isCreating: boolean;
-  onSaveIssue: (title: string) => void;
+  onSaveIssue: (title: string, storyPoints?: number) => void;
   onCancelCreate: () => void;
 }
+
 
 const SPRINT_STATUS_META: Record<SprintStatus, { label: string; cls: string }> = {
   active:    { label: 'ACTIVE',    cls: 'bl-sprint__badge--active' },
@@ -582,19 +644,17 @@ const SPRINT_STATUS_META: Record<SprintStatus, { label: string; cls: string }> =
   completed: { label: 'COMPLETED', cls: 'bl-sprint__badge--completed' },
 };
 
-/**
- * Sprint completion %: uses story points when set (>0); each unestimated issue counts as 1
- * so progress matches the visible issue list (avoids 0% when no points are entered).
- */
-function sprintCompletionPercent(tickets: Ticket[]): number {
-  if (tickets.length === 0) return 0;
-  const weight = (t: Ticket) => {
-    const p = t.storyPoints;
-    return p != null && p > 0 ? p : 1;
-  };
-  const totalW = tickets.reduce((s, t) => s + weight(t), 0);
-  const doneW = tickets.filter((t) => t.status === 'done').reduce((s, t) => s + weight(t), 0);
-  return Math.round((doneW / totalW) * 100);
+function sprintCompletionPercent(sprint: Sprint, tickets: Ticket[]): number | null {
+  if (sprint.status === 'completed') {
+    return sprint.finalScopeCompletionPercent ?? null;
+  }
+  const estimated = tickets.filter((ticket) => (ticket.storyPoints ?? 0) > 0);
+  const total = estimated.reduce((sum, ticket) => sum + (ticket.storyPoints ?? 0), 0);
+  if (total <= 0) return 0;
+  const done = estimated
+    .filter((ticket) => ticket.status === 'done')
+    .reduce((sum, ticket) => sum + (ticket.storyPoints ?? 0), 0);
+  return Math.round((done / total) * 100);
 }
 
 /**
@@ -719,15 +779,38 @@ function SprintEstimateBadges({ tickets }: { tickets: Ticket[] }) {
 
 function SprintSection({
   sprint, rootTickets, statsTickets, allTickets, collapsedParents, onToggleParentFold, isCollapsed, onToggle,
-  onStartSprint, onCompleteSprint, onEditSprint, onDeleteSprint, onReorderSprint, canMoveUp, canMoveDown,
+  onStartSprint, onCompleteSprint, onPaceCheck, onRecoveryCheck, onEditSprint, onDeleteSprint, onReorderSprint, canMoveUp, canMoveDown,
   startDisabledReason, onCreateIssue, onTicketClick,
   isCreating, onSaveIssue, onCancelCreate,
 }: SprintSectionProps) {
-  const progress = sprintCompletionPercent(statsTickets);
+  const progress = sprintCompletionPercent(sprint, statsTickets);
   const meta = SPRINT_STATUS_META[sprint.status];
-  const nTotal = statsTickets.length;
+  // Recovery isn't gated on health check: recovery's own diagnose step runs a different, issue-level
+  // signal set (blocked-without-flag, owner overload, late scope add, ...) that a sprint-level
+  // on_track burndown can still miss — health's riskLevel is a hint about when recovery is worth a
+  // look, not a precondition for running it. Future/completed sprints (health isn't computed there) get
+  // no hint either way.
+  const healthRiskLevel = sprint.status === 'active'
+    ? computeSprintPaceStats(sprint, statsTickets).riskLevel
+    : null;
+  const recoverySuggested = healthRiskLevel === 'at_risk' || healthRiskLevel === 'behind';
+  const nTotal = sprint.status === 'completed'
+    ? (sprint.finalIssueCount ?? statsTickets.length)
+    : statsTickets.length;
   const nTop = rootTickets.length;
-  const nNested = nTotal - nTop;
+  const nNested = sprint.status === 'completed' ? 0 : nTotal - nTop;
+  const completedHistoricalIssues = sprint.completedIssueCount ?? 0;
+  const carriedOverIssues = sprint.status === 'completed'
+    ? Math.max(0, (sprint.finalIssueCount ?? 0) - completedHistoricalIssues)
+    : 0;
+  const historyTitle = sprint.status === 'completed' && sprint.finalScopeCompletionPercent != null
+    ? [
+        `Initial commitment: ${sprint.initialCompletedPoints ?? 0}/${sprint.initialCommittedPoints ?? 0} points (${sprint.commitmentCompletionPercent ?? 0}%)`,
+        `Final scope: ${sprint.completedPoints ?? 0}/${sprint.finalScopePoints ?? 0} points (${sprint.finalScopeCompletionPercent ?? 0}%)`,
+        `Completed issues: ${sprint.completedIssueCount ?? 0}/${sprint.finalIssueCount ?? 0}`,
+        `Unestimated issues: ${sprint.unestimatedIssueCount ?? 0}`,
+      ].join('\n')
+    : undefined;
 
   return (
     <section className="bl-sprint">
@@ -740,18 +823,35 @@ function SprintSection({
           className="bl-sprint__count"
           title="All issues in this sprint. Epics stay in the backlog bucket only (Jira-style). The Board hides epics. Same parent-card rule: non-subtasks are top-level rows; subtasks nest when their parent is in the same sprint."
         >
-          {nTotal} issue{nTotal !== 1 ? 's' : ''}
-          {nNested > 0 && (
+          {sprint.status === 'completed' ? (
+            <>
+              {nTotal} historical issue{nTotal !== 1 ? 's' : ''}
+              <span className="bl-sprint__count-detail">
+                · {completedHistoricalIssues} completed · {carriedOverIssues} carried over
+              </span>
+            </>
+          ) : (
+            <>{nTotal} issue{nTotal !== 1 ? 's' : ''}</>
+          )}
+          {sprint.status !== 'completed' && nNested > 0 && (
             <span className="bl-sprint__count-detail">· {nTop} top-level, {nNested} nested</span>
           )}
         </span>
-        <SprintEstimateBadges tickets={statsTickets} />
-        {statsTickets.length > 0 && (
-          <span className="bl-sprint__progress-wrap" onClick={(e) => e.stopPropagation()}>
+        {sprint.status === 'completed' ? (
+          <span className="bl-sprint__history-points" title={historyTitle}>
+            {progress == null
+              ? 'Historical metrics unavailable'
+              : `${sprint.completedPoints ?? 0}/${sprint.finalScopePoints ?? 0} pts`}
+          </span>
+        ) : (
+          <SprintEstimateBadges tickets={statsTickets} />
+        )}
+        {nTotal > 0 && progress != null && (
+          <span className="bl-sprint__progress-wrap" title={historyTitle} onClick={(e) => e.stopPropagation()}>
             <span className="bl-sprint__progress-bar">
               <span className="bl-sprint__progress-fill" style={{ width: `${progress}%` }} />
             </span>
-            <span className="bl-sprint__progress-label">{progress}%</span>
+            <span className="bl-sprint__progress-label">{progress}% pts</span>
           </span>
         )}
         <div className="bl-sprint__actions" onClick={(e) => e.stopPropagation()}>
@@ -765,6 +865,60 @@ function SprintSection({
             >
               Start sprint
             </button>
+          )}
+          {sprint.status === 'active' && onPaceCheck && (
+            <span className="bl-sprint__action-with-help">
+              <button type="button" className="bl-btn bl-btn--outline bl-btn--sm" onClick={onPaceCheck}>
+                🩺 Sprint pace check
+              </button>
+              <Tooltip
+                text={
+                  <TooltipExplainer
+                    {...SPRINT_PACE_HELP}
+                  />
+                }
+                wide
+              >
+                <button
+                  type="button"
+                  className="bl-sprint__help-icon"
+                  aria-label="Show Sprint pace check criteria"
+                  onClick={(event) => event.preventDefault()}
+                >?</button>
+              </Tooltip>
+            </span>
+          )}
+          {onRecoveryCheck && (
+            <span className="bl-sprint__action-with-help">
+              <button
+                type="button"
+                className={`bl-btn bl-btn--outline bl-btn--sm${recoverySuggested ? ' bl-btn--suggested' : ''}`}
+                onClick={onRecoveryCheck}
+                title={
+                  recoverySuggested
+                    ? `Suggested now — Sprint pace check shows this sprint ${healthRiskLevel?.replace('_', ' ')} (a pace signal, not a diagnosis).`
+                    : undefined
+                }
+              >
+                🚑 Diagnose risk
+                {recoverySuggested && <span className="bl-sprint__suggested-badge">Suggested</span>}
+              </button>
+              <Tooltip
+                text={
+                  <TooltipExplainer
+                    {...SPRINT_RECOVERY_HELP}
+                  />
+                }
+                wide
+              >
+                <button
+                  type="button"
+                  className="bl-sprint__help-icon"
+                  aria-label="Show Diagnose risk criteria"
+                  onClick={(event) => event.preventDefault()}
+                >?</button>
+              </Tooltip>
+            </span>
           )}
           {sprint.status === 'active' && (
             <button type="button" className="bl-btn bl-btn--default bl-btn--sm" onClick={onCompleteSprint}>
@@ -783,6 +937,12 @@ function SprintSection({
 
       {sprint.goal && !isCollapsed && (
         <p className="bl-sprint__goal">Sprint Goal: {sprint.goal}</p>
+      )}
+      {!isCollapsed && sprint.status === 'completed' && carriedOverIssues > 0 && (
+        <p className="bl-sprint__history-note">
+          {carriedOverIssues} incomplete issue{carriedOverIssues !== 1 ? 's were' : ' was'} carried forward.
+          The rows below are completed work retained on this sprint; carried-over work now appears in its destination sprint.
+        </p>
       )}
 
       {!isCollapsed && (
@@ -818,7 +978,7 @@ function SprintSection({
               ))}
               {provided.placeholder}
               {isCreating
-                ? <InlineCreate onSave={onSaveIssue} onCancel={onCancelCreate} />
+                ? <InlineCreate onSave={onSaveIssue} onCancel={onCancelCreate} requirePoints />
                 : <button type="button" className="bl-create-btn" onClick={onCreateIssue}>+ Create issue</button>
               }
             </div>
@@ -842,7 +1002,7 @@ interface BacklogSectionProps {
   onTicketClick: (id: string) => void;
   isCreating: boolean;
   onCreateIssue: () => void;
-  onSaveIssue: (title: string) => void;
+  onSaveIssue: (title: string, storyPoints?: number) => void;
   onCancelCreate: () => void;
 }
 
@@ -935,6 +1095,7 @@ export function Backlog() {
     applyBacklogRank,
     addComment, editComment, deleteComment, addIssueLink, deleteIssueLink,
     addCodeLink, deleteCodeLink, refreshCodeLinks, hydrateIssueDetail,
+    refreshData,
   } = useTickets();
   const [searchParams, setSearchParams] = useSearchParams();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['completed']));
@@ -942,7 +1103,11 @@ export function Backlog() {
   const [startingSprintId, setStartingSprintId] = useState<string | null>(null);
   const [editingSprintId, setEditingSprintId] = useState<string | null>(null);
   const [completingSprintId, setCompletingSprintId] = useState<string | null>(null);
+  const [showPlanEpicModal, setShowPlanEpicModal] = useState(false);
+  const [paceCheckSprintId, setPaceCheckSprintId] = useState<string | null>(null);
+  const [recoveryCheckSprintId, setRecoveryCheckSprintId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [topLevelOnly, setTopLevelOnly] = useState(false);
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
   const [issueFilters, setIssueFilters] = useState<IssueFilters>(EMPTY_ISSUE_FILTERS);
   /** Parent issue keys with subtasks folded (hidden). */
@@ -983,7 +1148,10 @@ export function Backlog() {
   }, [backlogAssigneeNames.sortedNames]);
 
   const filteredTickets = useMemo(() => {
-    const byAssignee = tickets.filter((t) => ticketMatchesAssigneeFilter(t, assigneeFilter));
+    const byHierarchy = topLevelOnly
+      ? tickets.filter((ticket) => ticket.issueType !== 'subtask')
+      : tickets;
+    const byAssignee = byHierarchy.filter((t) => ticketMatchesAssigneeFilter(t, assigneeFilter));
     const q = search.trim().toLowerCase();
     const useFilters = hasActiveIssueFilters(issueFilters);
     const match = (t: Ticket) => {
@@ -1001,20 +1169,19 @@ export function Backlog() {
     if (!q && !useFilters) return byAssignee;
     const direct = byAssignee.filter(match);
     return withMatchedParents(direct, byAssignee);
-  }, [tickets, search, issueFilters, assigneeFilter]);
+  }, [tickets, search, issueFilters, assigneeFilter, topLevelOnly]);
 
-  const statsByBucket = useMemo(() => {
+  /** Metrics are never filter-dependent; search/filter only changes visible rows. */
+  const allStatsByBucket = useMemo(() => {
     const map: Record<string, Ticket[]> = {};
-    for (const t of filteredTickets) {
-      // Jira-style: epics live "behind the scenes" — assigned via the Add-epic picker
-      // on each issue, never shown as backlog rows.
-      if (t.issueType === 'epic') continue;
-      const key = displayBucketKey(t);
+    for (const ticket of tickets) {
+      if (ticket.issueType === 'epic') continue;
+      const key = displayBucketKey(ticket);
       if (!map[key]) map[key] = [];
-      map[key].push(t);
+      map[key].push(ticket);
     }
     return map;
-  }, [filteredTickets]);
+  }, [tickets]);
 
   const rootsByBucket = useMemo(() => {
     const map: Record<string, Ticket[]> = {};
@@ -1050,7 +1217,11 @@ export function Backlog() {
   function toggleCollapse(id: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   }
@@ -1079,6 +1250,14 @@ export function Backlog() {
     if (!moved) return;
     if (moved.issueType === 'epic' && nextSprintId != null) {
       window.alert('In Jira-style workflow, epics are not assigned to sprints. Link stories to the epic and plan those into sprints.');
+      return;
+    }
+    if (
+      nextSprintId != null
+      && moved.issueType !== 'subtask'
+      && !(moved.storyPoints != null && moved.storyPoints > 0)
+    ) {
+      window.alert(`Add story points to ${moved.id} before moving it into a sprint.`);
       return;
     }
 
@@ -1122,8 +1301,8 @@ export function Backlog() {
     applyBacklogRank(updates);
   }, [tickets, rootsByBucket, allRootsByBucket, applyBacklogRank]);
 
-  function handleCreateIssue(sprintId: string | null, title: string) {
-    createIssueInSprint(sprintId, title);
+  function handleCreateIssue(sprintId: string | null, title: string, storyPoints?: number) {
+    createIssueInSprint(sprintId, title, storyPoints);
     setCreatingIn(null);
   }
 
@@ -1216,7 +1395,7 @@ export function Backlog() {
         key={sprint.id}
         sprint={sprint}
         rootTickets={rootsByBucket[sprint.id] ?? []}
-        statsTickets={statsByBucket[sprint.id] ?? []}
+        statsTickets={allStatsByBucket[sprint.id] ?? []}
         allTickets={filteredTickets}
         collapsedParents={collapsedParents}
         onToggleParentFold={toggleParentFold}
@@ -1224,6 +1403,10 @@ export function Backlog() {
         onToggle={() => toggleCollapse(sprint.id)}
         onStartSprint={() => setStartingSprintId(sprint.id)}
         onCompleteSprint={() => setCompletingSprintId(sprint.id)}
+        onPaceCheck={sprint.status === 'active' ? () => setPaceCheckSprintId(sprint.id) : undefined}
+        onRecoveryCheck={
+          sprint.status !== 'completed' ? () => setRecoveryCheckSprintId(sprint.id) : undefined
+        }
         onEditSprint={() => setEditingSprintId(sprint.id)}
         onDeleteSprint={() => handleDeleteSprint(sprint.id)}
         onReorderSprint={isFuture ? (action) => reorderSprint(sprint.id, action) : undefined}
@@ -1233,7 +1416,7 @@ export function Backlog() {
         onCreateIssue={() => setCreatingIn(sprint.id)}
         onTicketClick={(id) => openTicket(id)}
         isCreating={creatingIn === sprint.id}
-        onSaveIssue={(title) => handleCreateIssue(sprint.id, title)}
+        onSaveIssue={bindInlineIssueToSprint(handleCreateIssue, sprint.id)}
         onCancelCreate={() => setCreatingIn(null)}
       />
     );
@@ -1266,6 +1449,7 @@ export function Backlog() {
       {startingSprint && (
         <StartSprintModal
           sprint={startingSprint}
+          tickets={tickets.filter((ticket) => ticket.sprintId === startingSprint.id)}
           allSprints={sprints}
           onConfirm={(updates) => handleStartSprint(startingSprint.id, updates)}
           onClose={() => setStartingSprintId(null)}
@@ -1291,6 +1475,38 @@ export function Backlog() {
         />
       )}
 
+      {showPlanEpicModal && (
+        <PlanEpicModal
+          spaceId={Number(currentSpace.id)}
+          sprints={sprints}
+          onCommitted={() => refreshData()}
+          onClose={() => setShowPlanEpicModal(false)}
+        />
+      )}
+
+      {paceCheckSprintId && (() => {
+        const paceSprint = sprints.find((s) => s.id === paceCheckSprintId);
+        return paceSprint ? (
+          <SprintPaceModal
+            sprint={paceSprint}
+            tickets={tickets}
+            onClose={() => setPaceCheckSprintId(null)}
+          />
+        ) : null;
+      })()}
+
+      {recoveryCheckSprintId && (() => {
+        const recoverySprint = sprints.find((s) => s.id === recoveryCheckSprintId);
+        return recoverySprint ? (
+          <SprintRecoveryModal
+            spaceId={Number(currentSpace.id)}
+            sprintId={Number(recoverySprint.id)}
+            sprintName={recoverySprint.name}
+            onClose={() => setRecoveryCheckSprintId(null)}
+          />
+        ) : null;
+      })()}
+
       <div className="bl-toolbar">
         <input
           type="search"
@@ -1311,7 +1527,28 @@ export function Backlog() {
           onChange={setIssueFilters}
           hideAssignee
         />
-        <div style={{ marginLeft: 'auto' }}>
+        <div
+          className="bl-toolbar__view-control"
+          title="Changes which rows are shown. Sprint issue and point totals stay unchanged."
+        >
+          <span className="bl-toolbar__view-label">View</span>
+          <button
+            type="button"
+            className="bl-toolbar__subtask-switch"
+            role="switch"
+            aria-checked={!topLevelOnly}
+            onClick={() => setTopLevelOnly((current) => !current)}
+          >
+            <span className={`bl-toolbar__switch-track${topLevelOnly ? '' : ' is-on'}`} aria-hidden>
+              <span className="bl-toolbar__switch-thumb" />
+            </span>
+            <span>Show subtasks</span>
+          </button>
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+          <button type="button" className="bl-btn bl-btn--outline" onClick={() => setShowPlanEpicModal(true)}>
+            ✨ Plan Epic with AI
+          </button>
           <button type="button" className="bl-btn bl-btn--primary" onClick={handleCreateSprint}>
             + Create Sprint
           </button>
@@ -1355,7 +1592,7 @@ export function Backlog() {
 
         <BacklogSection
           rootTickets={rootsByBucket['backlog'] ?? []}
-          statsTickets={statsByBucket['backlog'] ?? []}
+          statsTickets={allStatsByBucket['backlog'] ?? []}
           allTickets={filteredTickets}
           collapsedParents={collapsedParents}
           onToggleParentFold={toggleParentFold}
@@ -1364,7 +1601,7 @@ export function Backlog() {
           onTicketClick={(id) => openTicket(id)}
           isCreating={creatingIn === 'backlog'}
           onCreateIssue={() => setCreatingIn('backlog')}
-          onSaveIssue={(title) => handleCreateIssue(null, title)}
+          onSaveIssue={bindInlineIssueToSprint(handleCreateIssue, null)}
           onCancelCreate={() => setCreatingIn(null)}
         />
       </DragDropContext>

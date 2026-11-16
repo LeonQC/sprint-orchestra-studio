@@ -1,0 +1,1200 @@
+.sr-modal.bl-modal {
+  width: 860px;
+  max-width: 94vw;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
+
+.sr-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sr-badge--diagnosing, .sr-badge--awaiting_clarification { background: #eff6ff; color: #2563eb; }
+.sr-badge--awaiting_plan_approval { background: #eff6ff; color: #2563eb; }
+.sr-badge--no_risk_found { background: #f0fdf4; color: #16a34a; }
+.sr-badge--committing, .sr-badge--committed, .sr-badge--waiting_reevaluation { background: #fefce8; color: #ca8a04; }
+.sr-badge--recovered { background: #f0fdf4; color: #16a34a; }
+.sr-badge--escalated { background: #fef2f2; color: #dc2626; }
+
+.sr-escalation {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+/* Focused handoff: every flagged issue already has an action against it — nothing failed here, so
+   this deliberately doesn't use the alarming red of a genuinely unresolved escalation. */
+.sr-escalation--focused {
+  border-color: #c7d2fe;
+  background: #f5f7ff;
+}
+
+.sr-escalation--focused .sr-escalation__title {
+  color: #3730a3;
+}
+
+.sr-escalation--focused .sr-escalation__round {
+  border-color: #c7d2fe;
+}
+
+.sr-escalation--focused .sr-escalation__round-badge {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.sr-escalation__title {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.sr-escalation__title {
+  margin: 0 0 8px;
+}
+
+.sr-escalation__rounds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sr-escalation__round {
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.sr-escalation__round-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.sr-escalation__round-badge {
+  background: #fee2e2;
+  color: #b91c1c;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.sr-escalation__round-plan {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.sr-escalation__round-rationale {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.sr-escalation__actions-title {
+  margin: 8px 0 3px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+
+.sr-escalation__round-actions {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #334155;
+  /* Comment bodies are now shown in full (they used to be summarised away as "comment added to X"),
+     so these entries can be long — keep them readable rather than letting one wrap into a wall. */
+  overflow-wrap: anywhere;
+}
+
+.sr-escalation__round-actions li {
+  margin-bottom: 2px;
+}
+
+.sr-escalation__reasons {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #fecaca;
+}
+
+.sr-escalation__reasons-title {
+  margin: 0 0 3px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.sr-escalation__reasons ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #7f1d1d;
+}
+.sr-badge--rejected { background: #f1f5f9; color: #64748b; }
+.sr-badge--failed { background: #fef2f2; color: #dc2626; }
+
+/* --- waiting indicator: no SSE on this path, this is the cheap substitute (see component docstring) --- */
+.sr-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: sr-spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+@keyframes sr-spin {
+  to { transform: rotate(360deg); }
+}
+
+.sr-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.sr-waiting--local {
+  background: #eff6ff;
+  color: #2563eb;
+  padding: 4px 10px;
+  border-radius: 6px;
+  align-self: flex-start;
+}
+
+.sr-clarify {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.sr-question {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.sr-clarify__why {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #64748b;
+}
+
+.sr-section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin: 4px 0 6px;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.sr-hypotheses {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sr-hyp-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.sr-hyp-card__top {
+  margin-bottom: 4px;
+}
+
+.sr-hyp-card__statement {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: #1e293b;
+}
+
+.sr-conf--high { background: #f0fdf4; color: #16a34a; }
+.sr-conf--medium { background: #fefce8; color: #ca8a04; }
+.sr-conf--low { background: #fef2f2; color: #dc2626; }
+
+.sr-cites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+/* Tooltip box styling (.tt-trigger / .tt-bubble) now lives in Tooltip.css, imported by the shared
+   `Tooltip` component itself — nothing sprint-recovery-specific about it once the Backlog row's
+   explainer icons needed the same positioning logic. */
+
+.sr-cite-chip {
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-family: ui-monospace, monospace;
+}
+
+/* The inline variant sits inside a sentence, not in a separate row — smaller, coloured to read as "a
+   footnote" rather than another word in the sentence, with tight margins so a run of them doesn't
+   force awkward line breaks. */
+.sr-cite-chip--inline {
+  background: #eef2ff;
+  color: #4f46e5;
+  margin: 0 1px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.sr-hypotheses--past summary {
+  color: #64748b;
+}
+
+.sr-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The AI answering the human back, rather than describing the sprint — deliberately styled as a reply
+   (accent left edge, its own tag) so it doesn't read as one more system-generated finding among the
+   plan cards below it. */
+.sr-note-response {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #6366f1;
+  border-radius: 0 8px 8px 0;
+  background: #f5f7ff;
+  color: #312e81;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.sr-note-response__tag {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6366f1;
+  margin-bottom: 3px;
+}
+
+.sr-plan {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+}
+
+.sr-plan__header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.sr-plan__name {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.sr-plan__rationale {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.sr-plan__impact {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.sr-plan__impact b {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.sr-actions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sr-actions li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.83rem;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.sr-actions li.sr-action--done {
+  background: #f0fdf4;
+}
+
+.sr-action__done-mark {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.sr-action-chip {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.sr-action-chip--link_dependency { background: #eff6ff; color: #2563eb; }
+.sr-action-chip--change_priority { background: #fefce8; color: #ca8a04; }
+.sr-action-chip--move_out_of_sprint { background: #fef2f2; color: #dc2626; }
+.sr-action-chip--add_comment { background: #f1f5f9; color: #64748b; }
+
+.sr-action__body {
+  color: #334155;
+  line-height: 1.5;
+}
+
+.sr-action__body code {
+  background: #eef2f7;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+
+.sr-action__comment {
+  display: block;
+  color: #64748b;
+  font-style: italic;
+  margin-top: 2px;
+}
+
+.sr-plan__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sr-history {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Keep progress, controls and usage as separate information groups. The old single row made a status,
+   attempt counter, token cost and history action all look equally important. */
+.sr-status-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 14px;
+  border: 1px solid #dbeafe;
+  border-left: 4px solid #60a5fa;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.sr-status-card--no_risk_found,
+.sr-status-card--recovered {
+  border-color: #bbf7d0;
+  border-left-color: #22c55e;
+  background: #f7fef9;
+}
+
+.sr-status-card--escalated,
+.sr-status-card--failed {
+  border-color: #fecaca;
+  border-left-color: #ef4444;
+  background: #fffafa;
+}
+
+.sr-status-card--committing,
+.sr-status-card--committed,
+.sr-status-card--waiting_reevaluation {
+  border-color: #fde68a;
+  border-left-color: #eab308;
+  background: #fffef7;
+}
+
+.sr-status-card__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sr-status-card__eyebrow {
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sr-status-card__title-row,
+.sr-status-card__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sr-status-card__description {
+  max-width: 590px;
+  margin: 0;
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.sr-status-card__actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.sr-attempt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: #64748b;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  padding: 5px 9px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.sr-attempt span {
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sr-attempt strong {
+  color: #334155;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .sr-status-card { flex-direction: column; }
+  .sr-status-card__actions { width: 100%; justify-content: flex-start; }
+}
+
+/* The "?" affordance next to either retry entry point, plus the panel it opens. One shared style for
+   one shared explanation — see WhichRetryHelp. */
+.sr-help-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0;
+  border: 1px solid #c7d2fe;
+  border-radius: 50%;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.sr-help-toggle:hover {
+  background: #e0e7ff;
+  border-color: #a5b4fc;
+}
+
+.sr-help {
+  margin: 8px 0 4px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.sr-help p { margin: 0; }
+
+.sr-help__lead {
+  color: #1e293b;
+}
+
+/* Two columns on anything but a narrow modal: the label acts as a row header so the two options read
+   as a comparison rather than as two unrelated paragraphs. */
+.sr-help__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .sr-help__row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+.sr-help__which {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #4338ca;
+  background: #eef2ff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.sr-help__which--rewind {
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.sr-help__when { color: #1e293b; }
+
+.sr-help__eg {
+  margin-top: 3px !important;
+  color: #475569;
+}
+
+.sr-help__how {
+  margin-top: 3px !important;
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.sr-help__rule {
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 9px;
+  color: #334155;
+}
+
+.sr-stale-caveat {
+  font-size: 0.78rem;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.sr-resumed-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.sr-availability {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #fde68a;
+  border-left: 4px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.sr-availability__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.sr-last-stop {
+  padding: 8px 12px;
+  border-left: 3px solid #94a3b8;
+  background: #f8fafc;
+  border-radius: 6px;
+}
+
+.sr-stop-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sr-stop-confirm {
+  display: flex;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sr-availability--error {
+  border-color: #fecaca;
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+
+.sr-availability__icon {
+  flex: none;
+  font-size: 1.1rem;
+  line-height: 1.4;
+}
+
+.sr-availability__content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sr-availability__content strong {
+  color: #78350f;
+  font-size: 0.88rem;
+}
+
+.sr-availability--error .sr-availability__content strong {
+  color: #991b1b;
+}
+
+.sr-availability__content p {
+  margin: 4px 0 0;
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.sr-availability__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.sr-availability__facts > div {
+  padding: 8px 10px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.sr-availability__facts > div:last-child {
+  grid-column: 1 / -1;
+}
+
+.sr-availability__facts dt {
+  color: #92400e;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sr-availability__facts dd {
+  margin: 3px 0 0;
+  color: #334155;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.sr-availability__facts dd > strong {
+  color: #0f172a;
+  font-size: inherit;
+}
+
+.sr-availability__next {
+  font-weight: 600;
+}
+
+.sr-availability__detail {
+  color: #991b1b !important;
+  font-size: 0.74rem !important;
+}
+
+@media (max-width: 640px) {
+  .sr-availability { flex-wrap: wrap; }
+  .sr-availability .bl-btn { margin-left: 2rem; }
+  .sr-availability__facts { grid-template-columns: 1fr; }
+  .sr-availability__facts > div:last-child { grid-column: auto; }
+}
+
+/* Found live: `.rl-error` (shared across every modal in this app) has no styling defined anywhere —
+   an error rendered as plain black text, indistinguishable from every other line in the modal, at
+   the very top of a body that's already scrolled well past that point by the time an error can occur
+   (approving a plan is the last thing visible before a request goes out). A real kill -9 mid-approve
+   produced exactly that: "network error" landed off-screen, unstyled, and was only found by scrolling
+   up manually. `position: sticky` (not a scroll-into-view effect) keeps it pinned to the top of
+   `.sr-body`'s own scroll area the instant it appears, regardless of where the reader's scroll
+   position already was — no JS scroll manipulation, and it un-pins itself the moment `.sr-body`
+   scrolls back to its own top, so it never permanently blocks content above it. */
+.sr-error-banner {
+  position: sticky;
+  top: -1px;
+  z-index: 5;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+/* Past steps: a real vertical timeline. The previous version was a flat radio list where every row
+   read almost identically and nothing indicated ordering — the single most confusing panel in this
+   modal. Newest first (matching every activity feed people already know), an explicit step number so
+   ordering survives identical labels, a connector line, and both relative and absolute time. */
+.sr-timeline {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  position: relative;
+}
+
+.sr-timeline__item {
+  position: relative;
+  padding-left: 22px;
+  border-radius: 8px;
+  transition: background 0.12s ease;
+}
+
+/* The connector line, drawn between markers rather than through them — stops at the last item so the
+   timeline visibly terminates instead of trailing into empty space. */
+.sr-timeline__item::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 22px;
+  bottom: -2px;
+  width: 2px;
+  background: #e2e8f0;
+}
+
+.sr-timeline__item:last-child::before {
+  display: none;
+}
+
+.sr-timeline__item:hover {
+  background: #f8fafc;
+}
+
+.sr-timeline__item--selected {
+  background: #eef2ff;
+}
+
+.sr-timeline__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px 8px 8px 0;
+}
+
+/* Found live: only a still-open decision (a plan or question nobody has acted on) is ever worth
+   rewinding to — every intermediate step is real history worth keeping visible, just not something to
+   click. No radio here at all (not just disabled), and `padding-left` stands in for the radio's own
+   width so the label text still lines up with the selectable rows above/below it. */
+.sr-timeline__row--info {
+  cursor: default;
+  padding-left: 22px;
+}
+
+.sr-timeline__item--info:hover {
+  background: none;
+}
+
+.sr-timeline__radio {
+  margin: 2px 0 0;
+  flex: none;
+}
+
+.sr-timeline__marker {
+  position: absolute;
+  left: 0;
+  top: 13px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  box-sizing: border-box;
+}
+
+.sr-timeline__item--latest .sr-timeline__marker {
+  border-color: #6366f1;
+  background: #6366f1;
+  box-shadow: 0 0 0 3px #e0e7ff;
+}
+
+.sr-timeline__item--selected .sr-timeline__marker {
+  border-color: #4f46e5;
+}
+
+/* A plainer, smaller dot for informational-only steps — visually recedes next to the real (selectable)
+   markers above, matching that these rows are context, not something to act on. */
+.sr-timeline__marker--info {
+  width: 8px;
+  height: 8px;
+  top: 16px;
+  left: 3px;
+  border-color: #e2e8f0;
+}
+
+.sr-timeline__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sr-timeline__headline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sr-timeline__step {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  flex: none;
+}
+
+/* The one thing in this whole panel actually worth clicking — deliberately louder than `.sr-timeline__
+   step`'s muted uppercase label, since found live a repeated generic "Waiting for your decision" gave
+   no way to tell a first draft apart from its third revision. */
+.sr-timeline__revision {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #4f46e5;
+  background: #eef2ff;
+  border-radius: 999px;
+  padding: 2px 8px;
+  flex: none;
+}
+
+/* A superseded/already-acted-on revision is still worth reading (it's the progression that makes this
+   list make sense) but must not look like the one thing still clickable — same badge shape, drained
+   of the accent colour. */
+.sr-timeline__revision--past {
+  color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.sr-timeline__superseded-note {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* One badge shape shared by the non-revision row kinds, colour-coded by what actually happened —
+   "In Jira" is the only one describing a real external side effect, so it's the only one that carries
+   a warm colour; "Ended" is terminal, not alarming. */
+.sr-timeline__badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  padding: 2px 8px;
+  flex: none;
+}
+
+.sr-timeline__badge--jira {
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.sr-timeline__badge--end {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+/* A human's own words, visually distinct from everything the system generated around them — this is
+   the one line in the timeline the reader wrote themselves. */
+.sr-timeline__note {
+  font-size: 0.78rem;
+  color: #3730a3;
+  background: #eef2ff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.sr-history__toggle {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #6366f1;
+  font-size: 0.76rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.sr-history__toggle:hover {
+  color: #4f46e5;
+}
+
+.sr-timeline__label {
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+.sr-timeline__row--info .sr-timeline__label {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.sr-timeline__now {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4f46e5;
+  background: #e0e7ff;
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.sr-timeline__time {
+  font-size: 0.74rem;
+  color: #94a3b8;
+}
+
+.sr-timeline__detail {
+  font-size: 0.78rem;
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
+/* Found live: rewinding to before real Jira writes this same thread already made doesn't undo them —
+   it just makes the thread forget it made them. Locked rows stay legible (not literally hidden — the
+   step is still real history) but visibly inert: no pointer cursor, no hover highlight, radio disabled. */
+.sr-timeline__item--locked .sr-timeline__row {
+  cursor: not-allowed;
+}
+
+.sr-timeline__item--locked:hover {
+  background: none;
+}
+
+.sr-timeline__item--locked .sr-timeline__label,
+.sr-timeline__item--locked .sr-timeline__step {
+  color: #94a3b8;
+}
+
+.sr-timeline__locked-note {
+  font-size: 0.74rem;
+  color: #b45309;
+  background: #fffbeb;
+  border-radius: 6px;
+  padding: 3px 7px;
+  width: fit-content;
+}
+
+.sr-rewind {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  background: #f5f7ff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sr-rewind__title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #3730a3;
+}
+
+.sr-rewind__explainer {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #4338ca;
+}
+
+.sr-rewind__steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #4338ca;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sr-hint-tight {
+  margin-top: -4px;
+}
+
+.sr-rewind__warning {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.sr-hint-tight code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+
+.sr-evidence {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.sr-evidence__summary {
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
+  border-top: none;
+  user-select: none;
+}
+
+.sr-evidence__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  /* Expanding shouldn't be able to blow the whole modal out to 41 items' worth of height — this list
+     scrolls internally, the <details> element itself still collapses/expands normally. */
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.sr-evidence__item {
+  border-top: 1px solid #f1f5f9;
+  padding-top: 8px;
+  opacity: 0.7;
+}
+
+.sr-evidence__item--cited {
+  opacity: 1;
+}
+
+.sr-evidence__cited-badge {
+  margin-left: 6px;
+  background: #f0fdf4;
+  color: #16a34a;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.sr-evidence__meta {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.sr-evidence__content {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: #334155;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.sr-revise {
+  border-top: 1px dashed #e2e8f0;
+  margin-top: 4px;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sr-revise__label {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.sr-revise__label--limit {
+  background: #fefce8;
+  color: #854d0e;
+  padding: 8px 10px;
+  border-radius: 6px;
+  line-height: 1.5;
+}
+
+.sr-revise__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

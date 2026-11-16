@@ -1,0 +1,866 @@
+/* Self-contained so this modal can open from anywhere Backlog.css isn't loaded, same convention as
+   CompleteSprintModal.css. Base overlay, modal, modal-child, and button classes are already
+   defined in Backlog.css for pages that import it — duplicated here for the same reason.
+
+   IMPORTANT: Backlog.css's .bl-modal has a *fixed* `width: 460px` (not max-width) and
+   .bl-modal__input has `width: 100%` — both same specificity (one class) as any single-class
+   override here, so which file's rule wins is a cascade-order race, not something to rely on.
+   Every rule below that needs to beat those uses a compound selector (two classes) to win on
+   specificity regardless of load order. */
+
+.bl-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.bl-modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  width: 100%;
+  max-width: 28rem;
+  overflow: hidden;
+}
+
+.bl-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.15rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bl-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bl-modal__close {
+  border: none;
+  background: transparent;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 1rem;
+}
+
+.bl-modal__close:hover { background: #f1f5f9; }
+
+.bl-modal__body {
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bl-modal__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.bl-modal__input {
+  padding: 0.5rem 0.7rem;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-family: inherit;
+  color: #0f172a;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.bl-modal__input:focus {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+.bl-modal__input:disabled {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.bl-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1.15rem;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.bl-btn {
+  padding: 0.45rem 0.9rem;
+  border-radius: 7px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+.bl-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bl-btn--ghost {
+  background: #fff;
+  color: #64748b;
+  border: 1.5px solid #e2e8f0;
+}
+
+.bl-btn--primary {
+  background: #4f46e5;
+  color: #fff;
+}
+
+.bl-btn--outline {
+  background: #fff;
+  color: #4f46e5;
+  border: 1.5px solid #c7d2fe;
+}
+
+.bl-btn--outline:hover:not(:disabled) {
+  background: #eef2ff;
+}
+
+/* Feature-specific ("pe-" = Plan Epic). Compound selectors (`.pe-modal.bl-modal`) throughout so
+   these reliably win over Backlog.css's same-specificity base rules regardless of stylesheet order. */
+
+.pe-modal.bl-modal {
+  width: min(56rem, 94vw);
+  max-width: min(56rem, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.pe-body {
+  overflow-y: auto;
+}
+
+.pe-textarea.bl-modal__input {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.pe-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.pe-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+}
+
+.pe-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.pe-hint--warn {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.pe-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #dc2626;
+}
+
+.pe-capacity-warning {
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #fbbf24;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.pe-capacity-decision {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.pe-capacity-decision p {
+  flex: 1 1 32rem;
+  margin: 0;
+}
+
+.pe-capacity-decision .bl-btn {
+  flex: none;
+}
+
+.pe-summary {
+  display: flex;
+  gap: 1.25rem;
+  padding: 0.6rem 0.9rem;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #4338ca;
+}
+
+.pe-summary strong {
+  font-size: 0.95rem;
+}
+
+.pe-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.pe-usage__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pe-usage__heading strong {
+  color: #334155;
+  font-size: 0.78rem;
+}
+
+.pe-usage__heading span {
+  font-size: 0.68rem;
+}
+
+.pe-usage__metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.pe-usage__metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.pe-usage__metrics span {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pe-usage__metrics strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.pe-auto-grow {
+  overflow-y: hidden;
+  resize: vertical;
+}
+
+.pe-refine {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.7rem;
+  background: #fafaf9;
+  border: 1px dashed #d6d3d1;
+  border-radius: 8px;
+}
+
+.pe-refine__row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.pe-refine__row .bl-modal__input {
+  flex: 1;
+}
+
+.pe-refine__input.bl-modal__input {
+  min-height: 2.35rem;
+  line-height: 1.4;
+}
+
+/* The log of what each Apply actually did — see RefineHistoryPanel. Sits below the instruction box,
+   oldest round first, so it reads as a running receipt rather than a result that gets replaced. */
+.pe-refine-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.pe-refine-history__round {
+  padding: 0.5rem 0.65rem;
+  background: #ffffff;
+  border: 1px solid #e7e5e4;
+  border-radius: 6px;
+}
+
+.pe-refine-history__instruction {
+  margin: 0 0 0.3rem;
+  font-size: 0.72rem;
+  color: #44403c;
+  font-style: italic;
+}
+
+.pe-refine-history__round-label {
+  font-style: normal;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.62rem;
+  color: #78716c;
+  margin-right: 0.4rem;
+}
+
+.pe-refine-history__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pe-refine-history__line {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #57534e;
+}
+
+.pe-refine-history__line--added {
+  color: #166534;
+}
+
+.pe-refine-history__line--removed {
+  color: #991b1b;
+}
+
+.pe-refine-history__line--muted {
+  color: #a8a29e;
+}
+
+.pe-bucket {
+  border: 2px solid #c7d2fe;
+  border-radius: 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f8fafc;
+  /* The modal body is a vertical flex scroller. Without this, multiple buckets shrink to the
+     viewport height and overflow:hidden clips their destination controls and every issue card. */
+  flex-shrink: 0;
+}
+
+.pe-bucket--over-capacity {
+  border-color: #f59e0b;
+}
+
+.pe-bucket__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0.9rem;
+  background: #eef2ff;
+  border-bottom: 1px solid #c7d2fe;
+}
+
+.pe-bucket--over-capacity .pe-bucket__header {
+  background: #fffbeb;
+  border-bottom-color: #fcd34d;
+}
+
+.pe-bucket__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pe-bucket__eyebrow,
+.pe-bucket__section-label,
+.pe-issue__eyebrow {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  color: #6366f1;
+}
+
+.pe-bucket__title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+
+.pe-bucket__points {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #c7d2fe;
+  white-space: nowrap;
+}
+
+.pe-summary__warning {
+  color: #b45309;
+}
+
+.pe-bucket__points.is-over {
+  color: #b45309;
+  border-color: #f59e0b;
+  background: #fff7ed;
+}
+
+.pe-bucket__target {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.pe-bucket__target-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.pe-bucket__target-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.pe-bucket__target-field > span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.pe-sprint-name.bl-modal__input {
+  min-height: 2.35rem;
+  line-height: 1.4;
+}
+
+.pe-bucket__pending-target {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px dashed #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.pe-bucket__issues-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.9rem 0.25rem;
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.pe-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.4rem 0.9rem 0.9rem;
+}
+
+.pe-issue {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.pe-issue__topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pe-issue__eyebrow {
+  color: #64748b;
+}
+
+.pe-issue__title.bl-modal__input {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  background: #fff;
+}
+
+.pe-issue__remove {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.35rem;
+  flex: none;
+  border-radius: 6px;
+}
+
+.pe-issue__remove:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.pe-issue__desc.bl-modal__input {
+  min-height: 72px;
+  resize: vertical;
+  font-size: 0.8rem;
+  background: #fff;
+}
+
+.pe-issue__rationale {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #92400e;
+  font-style: italic;
+}
+
+/* One line of provenance under the estimate rationale: which past issues the number came from, how
+   it compared, and how much of it rests on finished work. Deliberately quieter than the rationale
+   above it — this is evidence a reviewer can follow up, not something to read on every card. */
+.pe-issue__provenance {
+  margin: 0.15rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  color: #64748b;
+}
+
+.pe-issue__provenance-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.62rem;
+  color: #94a3b8;
+}
+
+.pe-issue__provenance-note {
+  color: #64748b;
+}
+
+.pe-issue__confidence {
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+/* Three tints rather than one: "low confidence" is the common, correct outcome for work with no
+   precedent, so it must not look like an error — grey, not red. */
+.pe-issue__confidence--high {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pe-issue__confidence--medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.pe-issue__confidence--low {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.pe-issue__meta {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pe-issue__type.bl-modal__input {
+  width: 7rem;
+  flex: none;
+  background: #fff;
+}
+
+.pe-issue__points.bl-modal__input {
+  width: 4.5rem;
+  flex: none;
+  background: #fff;
+}
+
+.pe-issue__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  flex: 1;
+  min-width: 8rem;
+}
+
+.pe-issue__labels--picker {
+  padding-top: 0.35rem;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.pe-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+  font-family: inherit;
+  background: transparent;
+  color: #64748b;
+}
+
+.pe-chip:disabled {
+  cursor: default;
+}
+
+.pe-chip--add {
+  border-style: dashed;
+  color: #4f46e5;
+  border-color: #c7d2fe;
+}
+
+.pe-issue__deps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.7rem;
+  border-left: 3px solid #818cf8;
+  border-radius: 0 8px 8px 0;
+  background: #eef2ff;
+  font-size: 0.72rem;
+  color: #475569;
+}
+
+.pe-legend {
+  margin: 0.35rem 0 0;
+  padding: 0 0.15rem;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.pe-legend strong {
+  color: #475569;
+}
+
+.pe-issue__dependency {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pe-issue__dependency p {
+  margin: 0;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.pe-issue__dependency-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* A blocking link is a suggestion, so declining it stays quiet until hovered rather than shouting for
+   attention the way the old "explanation missing" warning did. */
+.pe-dep-remove {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  cursor: pointer;
+}
+
+.pe-dep-remove:hover {
+  color: #dc2626;
+}
+
+@media (max-width: 700px) {
+  .pe-usage__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.pe-add-issue {
+  align-self: flex-start;
+  border: 1px dashed #c7d2fe;
+  background: transparent;
+  color: #4f46e5;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pe-add-issue:hover {
+  background: #eef2ff;
+}
+
+/* Description shown the way it will look on the board, with the markup one click away. The rendered
+   view has to reproduce the ticket view's own spacing closely enough that "this is what publishing
+   gets you" is true — a preview that looks different from the result is worse than no preview. */
+.pe-desc {
+  position: relative;
+}
+
+.pe-desc__toggle {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.3rem;
+  z-index: 1;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 0.62rem;
+  cursor: pointer;
+}
+
+.pe-desc__toggle:hover {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.pe-desc__rendered {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #1e293b;
+}
+
+/* The generated layout is h3 sections with short paragraphs and a criteria list; without these the
+   browser's default h3 margins make a five-section description twice as tall as the card. */
+.pe-desc__rendered h3 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+.pe-desc__rendered h3:first-child {
+  margin-top: 0;
+}
+
+.pe-desc__rendered p {
+  margin: 0 0 0.3rem;
+}
+
+.pe-desc__rendered ul {
+  margin: 0 0 0.3rem;
+  padding-left: 1.1rem;
+}
+
+.pe-desc__rendered li {
+  margin-bottom: 0.15rem;
+}
+
+.pe-desc__rendered strong {
+  color: #334155;
+}
+
+/* Live progress while the plan is generated. Sits where the error message would, so the modal does
+   not jump when one replaces the other. */
+.pe-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #e0e7ff;
+  border-radius: 6px;
+  background: #f5f7ff;
+  font-size: 0.78rem;
+  color: #4338ca;
+}
+
+.pe-progress__spinner {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex: none;
+  border: 2px solid #c7d2fe;
+  border-top-color: #4338ca;
+  border-radius: 50%;
+  animation: pe-progress-spin 0.7s linear infinite;
+}
+
+.pe-progress__label {
+  flex: 1;
+}
+
+/* Tabular figures so the seconds do not shuffle the label sideways every tick. */
+.pe-progress__elapsed {
+  font-variant-numeric: tabular-nums;
+  color: #6366f1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pe-progress__spinner {
+    animation: none;
+  }
+}
+
+@keyframes pe-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

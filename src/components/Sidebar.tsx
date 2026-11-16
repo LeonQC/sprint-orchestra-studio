@@ -25,6 +25,7 @@ export function Sidebar() {
     <>
       <aside className="sidebar">
         <nav className="sidebar__nav">
+          {spaces.some(space => isSpaceOwner(space, currentUser.id)) && <button type="button" className={`sidebar__link ${location.pathname === '/ai-feedback' ? 'sidebar__link--active' : ''}`} onClick={() => navigate('/ai-feedback')}>AI Feedback</button>}
           <button type="button" className={`sidebar__link ${location.pathname === '/groups' ? 'sidebar__link--active' : ''}`} onClick={() => navigate('/groups')}>Groups</button>
         </nav>
 

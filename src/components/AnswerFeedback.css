@@ -1,0 +1,16 @@
+.answer-feedback { margin-top: 16px; padding-top: 12px; border-top: 1px solid #e9edf3; font-size: 12px; }
+.answer-feedback__actions { display: flex; align-items: center; gap: 8px; color: #64748b; }
+.answer-feedback button { border: 1px solid #dce3ec; border-radius: 7px; background: white; color: #475569; padding: 6px 9px; display: inline-flex; align-items: center; justify-content: center; }
+.answer-feedback button:hover:not(:disabled) { background: #eef4ff; border-color: #a5bbed; color: #2563eb; }
+.answer-feedback button:disabled { opacity: .55; cursor: default; }
+.answer-feedback :is(button, select, textarea):focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.answer-feedback__disclosure { color: #64748b; font-size: 11px; margin: 8px 0 0; }
+.answer-feedback__form { margin-top: 12px; display: grid; gap: 8px; }
+.answer-feedback__form label { font-weight: 600; color: #334155; }
+.answer-feedback__form label span { font-weight: 400; color: #64748b; }
+.answer-feedback__form :is(select, textarea) { width: 100%; padding: 9px; color: #334155; border: 1px solid #dce3ec; border-radius: 7px; background: white; font-size: 12px; }
+.answer-feedback__form textarea { resize: vertical; min-height: 70px; }
+.answer-feedback__buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.answer-feedback button.answer-feedback__send { background: #2563eb; color: white; border-color: #2563eb; }
+.answer-feedback__thanks { margin: 0; color: #047857; }
+.answer-feedback__error { color: #b91c1c; }

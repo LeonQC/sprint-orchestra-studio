@@ -1,17 +1,13 @@
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
+import { parseApiError } from './apiError';
 
-if (import.meta.env.DEV && /:8081(\/|$)/.test(BASE_URL)) {
-  console.warn(
-    '[api] VITE_API_URL must point to the Spring Cloud Gateway (default :8080), not the backend (:8081). ' +
-      'Browser requests cannot send X-Gateway-Internal; calls to :8081 return 403 and the login page user list will be empty.',
-  );
-}
+// Empty = same origin: the Vite dev proxy locally, CloudFront + ALB when deployed (see vite.config.ts).
+const BASE_URL = import.meta.env.VITE_API_URL ?? '';
 
 const TOKEN_STORAGE_KEY = 'jira_auth_token';
 
 /**
  * fetch() rejects with an opaque TypeError ("Failed to fetch") when the server is
- * unreachable (gateway down/restarting) — surface something actionable instead.
+ * unreachable (dev server or a service down/restarting) — surface something actionable instead.
  */
 async function fetchOrConnectError(input: string, init: RequestInit): Promise<Response> {
   try {
@@ -38,11 +34,11 @@ export function getStoredAuthToken(): string | null {
 }
 
 /**
- * Paths that must not send a Bearer token: the API gateway validates JWT on every request that includes one.
- * Stale/invalid tokens would break login and user bootstrap (401) even though these routes are permitAll.
+ * Paths that must not send a Bearer token: services validate the JWT on every request that includes one.
+ * A stale token would break login (401) even though /api/auth is public.
  */
 function shouldSendBearer(path: string): boolean {
-  return !path.startsWith('/api/auth') && !path.startsWith('/api/users');
+  return !path.startsWith('/api/auth');
 }
 
 /**
@@ -83,16 +79,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!res.ok) {
     if (res.status === 401) handleUnauthorized(bearerSent);
     const text = await res.text().catch(() => '');
-    let message = `API error ${res.status}`;
-    if (text) {
-      try {
-        const body = JSON.parse(text) as { message?: string; error?: string };
-        message = body.message ?? body.error ?? text;
-      } catch {
-        message = text;
-      }
-    }
-    throw new Error(message);
+    throw parseApiError(res.status, text);
   }
   if (res.status === 204) return undefined as T;
 
@@ -132,24 +119,15 @@ async function raw(path: string, options?: RequestInit): Promise<Response> {
   if (!res.ok) {
     if (res.status === 401) handleUnauthorized(bearerSent);
     const text = await res.text().catch(() => '');
-    let message = `API error ${res.status}`;
-    if (text) {
-      try {
-        const body = JSON.parse(text) as { message?: string; error?: string };
-        message = body.message ?? body.error ?? text;
-      } catch {
-        message = text;
-      }
-    }
-    throw new Error(message);
+    throw parseApiError(res.status, text);
   }
   return res;
 }
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+  post: <T>(path: string, body?: unknown, headers?: HeadersInit) =>
+    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined, headers }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
@@ -159,4 +137,9 @@ export const api = {
     const res = await raw(path);
     return res.blob();
   },
+  /** Auth'd POST returning the raw `Response`, body untouched — for `text/event-stream` endpoints
+   *  where the caller needs `res.body`'s `ReadableStream` instead of a parsed JSON result (see
+   *  aiApi.askStream). Everything else (base URL, Bearer token, 401 handling) matches `api.post`. */
+  postStream: (path: string, body?: unknown, headers?: HeadersInit) =>
+    raw(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined }),
 };

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useCurrentUser } from '../context/UserContext';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 const DEFAULT_AFTER_LOGIN = '/spaces';
 
@@ -172,8 +172,8 @@ export function Login() {
             <p>Could not load users from the API.</p>
             <p className="login-api-error-detail">{usersLoadError}</p>
             <p className="login-hint">
-              Use <strong>Gateway on port 8080</strong> in <code>VITE_API_URL</code> (not backend 8081). Start Gateway and
-              backend, then retry.
+              Open the app through the Vite dev server (it proxies the API), and make sure jira-backend is
+              running, then retry.
             </p>
             <button type="button" className="login-retry" onClick={retryUsersBootstrap}>
               Retry

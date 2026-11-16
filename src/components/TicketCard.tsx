@@ -1,5 +1,6 @@
+import { Link } from 'react-router-dom';
 import type { Ticket } from '../types/ticket';
-import { ISSUE_TYPE_META, LABEL_COLORS, PRIORITY_META, labelsForIssueType } from '../types/ticket';
+import { ISSUE_TYPE_META, labelColor, PRIORITY_META, labelsForIssueType } from '../types/ticket';
 import { AssigneeAvatar } from './AssigneeAvatar';
 import { EpicPill, IssueKeyChip } from './IssueKeyChip';
 import { formatDueDateWithTime, parseDueDate } from '../utils/dueDate';
@@ -97,6 +98,19 @@ export function TicketCard({
 
   const articleClass = `ticket-card ${isSub ? 'ticket-card--subtask' : ''} ${showParentLink ? 'ticket-card--subtask-detached' : ''} ${isParent ? 'ticket-card--parent' : ''} ${ticket.flagged ? 'ticket-card--flagged' : ''}`;
 
+  /**
+   * Real <a> (via Link) so right-click / Cmd-click / middle-click give the browser's
+   * native "open in new tab" — a plain onClick handler on a div can't do that. Only
+   * intercept genuine plain-left-clicks to keep the existing in-app modal behavior;
+   * everything else (modifier keys, other buttons) is left to the browser.
+   */
+  function handleLinkClick(e: React.MouseEvent) {
+    if (!onClick) return;
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    onClick();
+  }
+
   const cardInner = (
     <>
       <header className="ticket-card__identity">
@@ -169,7 +183,7 @@ export function TicketCard({
               <span
                 key={label}
                 className="ticket-card__label"
-                style={{ background: LABEL_COLORS[label].bg, color: LABEL_COLORS[label].text }}
+                style={{ background: labelColor(label).bg, color: labelColor(label).text }}
               >
                 {label}
               </span>
@@ -219,33 +233,35 @@ export function TicketCard({
 
   if (showParentLink) {
     return (
-      <div
-        className="ticket-card-wrap ticket-card-wrap--bookmark ticket-card-wrap--detached-subtask"
-        onClick={onClick}
-        style={{ cursor: onClick ? 'pointer' : 'default' }}
+      <Link
+        to={`/ticket/${ticket.id}`}
+        onClick={handleLinkClick}
+        style={{ display: 'block', cursor: onClick ? 'pointer' : 'default' }}
         role="group"
         aria-label={`${ticket.id} ${ticket.title}, subtask of ${parentIssueKey}`}
       >
-        <div
-          className="ticket-card__bookmark"
-          title={`Parent issue ${parentIssueKey}`}
-        >
-          <span className="ticket-card__bookmark-glyph" aria-hidden>↳</span>
-          <span className="ticket-card__bookmark-text">Subtask of</span>
-          <IssueKeyChip issueKey={parentIssueKey!} size="sm" variant="sub" className="ticket-card__bookmark-key" />
+        <div className="ticket-card-wrap ticket-card-wrap--bookmark ticket-card-wrap--detached-subtask">
+          <div
+            className="ticket-card__bookmark"
+            title={`Parent issue ${parentIssueKey}`}
+          >
+            <span className="ticket-card__bookmark-glyph" aria-hidden>↳</span>
+            <span className="ticket-card__bookmark-text">Subtask of</span>
+            <IssueKeyChip issueKey={parentIssueKey!} size="sm" variant="sub" className="ticket-card__bookmark-key" />
+          </div>
+          <article className={articleClass}>{cardInner}</article>
         </div>
-        <article className={articleClass}>{cardInner}</article>
-      </div>
+      </Link>
     );
   }
 
   return (
-    <article
-      className={articleClass}
-      onClick={onClick}
-      style={{ cursor: onClick ? 'pointer' : 'default' }}
+    <Link
+      to={`/ticket/${ticket.id}`}
+      onClick={handleLinkClick}
+      style={{ display: 'block', cursor: onClick ? 'pointer' : 'default' }}
     >
-      {cardInner}
-    </article>
+      <article className={articleClass}>{cardInner}</article>
+    </Link>
   );
 }

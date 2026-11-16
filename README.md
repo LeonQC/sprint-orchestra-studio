@@ -1,17 +1,18 @@
-# Jira Agentic AI — Web (SPA)
+# Sprint Orchestra Studio
 
-Standalone **React + Vite + TypeScript** frontend for the Jira-style workspace UI (spaces, backlog, board, issues, etc.).  
-This tree is a copy of `frontend/` from the full-stack **jira-agentic-ai** repo, kept at the **repository root** so you can version and deploy it separately.
+The web frontend for Sprint Orchestra: a Jira-style workspace (spaces, backlog, board, timeline,
+issues, code links) with the AI features built in — Ask AI, task drafting, Plan Epic, Sprint Pace,
+Sprint Recovery, issue-level actions and the AI Feedback review page.
 
-## Prerequisites
-
-- **Node.js 20+** and npm
+React + Vite + TypeScript. The backend services live in
+[sprint-orchestra-core](https://github.com/michael23fire/sprint-orchestra-core).
 
 ## Setup
 
+Requires Node.js 20+ and the backend stack running (`scripts/dev_up.sh` in sprint-orchestra-core).
+
 ```bash
 npm install
-cp .env.example .env.local   # optional; edit API URL
 npm run dev                  # http://localhost:5173
 ```
 
@@ -19,40 +20,30 @@ npm run dev                  # http://localhost:5173
 
 | Command | Description |
 |--------|-------------|
-| `npm run dev` | Vite dev server |
-| `npm run build` | TypeScript check + production bundle → `dist/` |
+| `npm run dev` | Vite dev server, also the API proxy |
+| `npm run build` | Type check and production bundle → `dist/` |
 | `npm run preview` | Serve `dist/` locally |
 | `npm run lint` | ESLint |
+| `npm run test:ui` | Unit tests in `tests/` |
+| `npm run test:plan-epic` | Only the Plan Epic utility tests |
 
-## API URL
+## API routing
 
-The SPA calls the backend with `fetch`. Base URL is set in **`VITE_API_URL`** (build-time / dev env).  
-If unset, it defaults to **`http://localhost:8080`** — typically the Spring Cloud Gateway or the Spring Boot API, **not** a direct `:8081` service URL from the browser (see warnings in `src/api/client.ts`).
+The SPA calls relative paths (`/api/...`, `/api/ai/...`). In development, the Vite server proxies them
+(`vite.config.ts`): `/api/ai/*` goes to ai-service (`:8200`, prefix stripped), everything else under
+`/api` and the GitHub OAuth paths go to jira-backend (`:8081`). Override the targets with
+`JIRA_BACKEND_URL` / `AI_SERVICE_URL`. When deployed, CloudFront and an Application Load Balancer do
+the same routing, so the browser only ever talks to one origin and no CORS setup is needed.
 
-Example `.env.local`:
+Leave `VITE_API_URL` unset unless a build is served from a different origin than its API; then set it
+to that API origin before `npm run build`.
 
-```bash
-VITE_API_URL=http://localhost:8080
-```
+## Layout
 
-For production builds, set `VITE_API_URL` to your public API origin before `npm run build`.
-
-## CORS
-
-The backend must allow your SPA origin (e.g. `http://localhost:5173` in dev). Configure that in the API gateway / Spring CORS settings.
-
-## Own Git repository
-
-From this folder:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: SPA extracted from jira-agentic-ai"
-git remote add origin <your-new-remote-url>
-git push -u origin main
-```
-
-## Related repo
-
-Backend (Java/Spring Boot), gateway, database migrations, and Docker Compose live in the **jira-agentic-ai** monorepo.
+| Path | Contents |
+|------|----------|
+| `src/pages/` | Routed pages (backlog, board, timeline, ticket detail, AI feedback, ...) |
+| `src/components/` | Shared components, including the AI modals and the Ask AI panel |
+| `src/api/` | API clients, including SSE streaming for AI endpoints |
+| `src/context/` | User, space and ticket state |
+| `tests/` | Unit tests for pure utilities (`tsx --test`) |

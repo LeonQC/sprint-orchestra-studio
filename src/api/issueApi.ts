@@ -6,6 +6,8 @@ export interface CommentDto {
   authorId: number;
   authorName: string;
   content: string;
+  parentId?: number | null;
+  replyToId?: number | null;
   createdAt: string;
 }
 

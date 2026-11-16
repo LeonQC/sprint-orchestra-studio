@@ -1,0 +1,294 @@
+/* Self-contained, same convention/caveat as SprintPaceModal.css: .bl-* modal chrome is redefined
+   per modal file rather than shared, so this file stands alone too. */
+
+.bl-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.bl-modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  width: 100%;
+  max-width: 28rem;
+  overflow: hidden;
+}
+
+.bl-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.15rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bl-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bl-modal__close {
+  border: none;
+  background: transparent;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 1rem;
+}
+
+.bl-modal__close:hover { background: #f1f5f9; }
+
+.bl-modal__body {
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bl-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1.15rem;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.bl-btn {
+  padding: 0.45rem 0.9rem;
+  border-radius: 7px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+.bl-btn--primary {
+  background: #4f46e5;
+  color: #fff;
+}
+
+.bl-btn--primary:hover { background: #4338ca; }
+
+.bl-btn--outline {
+  background: #fff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+}
+
+.bl-btn--outline:hover { background: #eef2ff; }
+
+/* Feature-specific ("pr-" = Precedent search) */
+
+.pr-modal.bl-modal {
+  width: min(44rem, 94vw);
+  max-width: min(44rem, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.pr-body { overflow-y: auto; }
+
+.pr-startup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.4rem 0.1rem 0.6rem;
+}
+
+.pr-spinner {
+  display: inline-block;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: none;
+  border: 2.5px solid #c7d2fe;
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: pr-spin 0.7s linear infinite;
+}
+
+@keyframes pr-spin { to { transform: rotate(360deg); } }
+
+.pr-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.9rem 0.2rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.pr-error { margin: 0; font-size: 0.8rem; color: #dc2626; }
+.pr-hint { margin: 0; font-size: 0.8rem; color: #64748b; }
+.pr-hint--cached { font-style: italic; }
+
+.pr-hint--warn {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.pr-regen-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pr-regen-btn {
+  flex: none;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pr-regen-btn:hover:not(:disabled) { background: #e0e7ff; }
+.pr-regen-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* "Nothing relevant" is a real answer this feature is supposed to give, so it gets a proper panel
+   rather than an empty list that reads like a failure. */
+.pr-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border-radius: 9px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+.pr-verdict__icon { font-size: 1rem; line-height: 1.3; color: #94a3b8; }
+.pr-verdict strong { display: block; font-size: 0.875rem; margin-bottom: 0.15rem; }
+.pr-verdict p { margin: 0; font-size: 0.8rem; color: #64748b; line-height: 1.5; }
+
+.pr-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pr-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.pr-item__check {
+  flex: none;
+  margin-top: 0.2rem;
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+  accent-color: #4f46e5;
+}
+
+.pr-item__check:disabled { cursor: default; opacity: 0.5; }
+
+.pr-item__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.pr-item__key {
+  flex: none;
+  text-decoration: none;
+}
+
+.pr-item__newtab-hint {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.pr-item__linked-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #15803d;
+  background: #dcfce7;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.pr-item__linked-badge--other {
+  color: #64748b;
+  background: #f1f5f9;
+  text-transform: none;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.pr-item__body { flex: 1; min-width: 0; }
+
+.pr-item__title {
+  display: block;
+  margin: 0 0 0.3rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+  text-decoration: none;
+}
+
+.pr-item__title:hover { color: #4338ca; text-decoration: underline; }
+
+.pr-item__why {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: #0f172a;
+}
+
+.pr-item__takeaway {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #334155;
+  background: #f0f9ff;
+  border-left: 3px solid #38bdf8;
+  border-radius: 0 6px 6px 0;
+  padding: 0.45rem 0.6rem;
+}
+
+.pr-item__takeaway-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0369a1;
+  margin-bottom: 0.2rem;
+}

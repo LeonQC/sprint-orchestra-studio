@@ -1,0 +1,285 @@
+/* Self-contained, same convention/caveat as SprintPaceModal.css: .bl-* modal chrome is redefined
+   per modal file rather than shared, so this file stands alone too. */
+
+.bl-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.bl-modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  width: 100%;
+  max-width: 28rem;
+  overflow: hidden;
+}
+
+.bl-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.15rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bl-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bl-modal__close {
+  border: none;
+  background: transparent;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 1rem;
+}
+
+.bl-modal__close:hover { background: #f1f5f9; }
+
+.bl-modal__body {
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bl-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1.15rem;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.bl-btn {
+  padding: 0.45rem 0.9rem;
+  border-radius: 7px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+.bl-btn--primary {
+  background: #4f46e5;
+  color: #fff;
+}
+
+.bl-btn--primary:hover { background: #4338ca; }
+
+.bl-btn--outline {
+  background: #fff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+}
+
+.bl-btn--outline:hover { background: #eef2ff; }
+
+/* Feature-specific ("cd-" = Comment Digest) */
+
+.cd-startup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.4rem 0.1rem 0.6rem;
+}
+
+.cd-regen-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.cd-hint--cached {
+  font-style: italic;
+}
+
+.cd-regen-btn {
+  flex: none;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cd-regen-btn:hover:not(:disabled) { background: #e0e7ff; }
+.cd-regen-btn:disabled { opacity: 0.6; cursor: default; }
+
+.cd-modal.bl-modal {
+  width: min(46rem, 94vw);
+  max-width: min(46rem, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.cd-body {
+  overflow-y: auto;
+}
+
+.cd-spinner {
+  display: inline-block;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: none;
+  border: 2.5px solid #c7d2fe;
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: cd-spin 0.7s linear infinite;
+}
+
+@keyframes cd-spin {
+  to { transform: rotate(360deg); }
+}
+
+.cd-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.9rem 0.2rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.cd-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #dc2626;
+}
+
+.cd-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.cd-hint--warn {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.cd-report {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.cd-report__section {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.cd-report__label {
+  flex: none;
+  width: 4.75rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6366f1;
+  padding-top: 0.15rem;
+}
+
+.cd-report__text {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: #0f172a;
+}
+
+.cd-report__outcome {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.cd-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.6rem;
+}
+
+.cd-group__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+}
+
+.cd-group__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cd-point {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.cd-owner {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.cd-point__cites {
+  display: flex;
+  flex: none;
+  gap: 0.25rem;
+}
+
+.cd-cite {
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cd-cite:hover {
+  background: #e0e7ff;
+}

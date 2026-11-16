@@ -1,4 +1,5 @@
 export { api } from './client';
+export { ApiError } from './apiError';
 export { authApi } from './authApi';
 export { userApi } from './userApi';
 export { groupApi } from './groupApi';
@@ -11,8 +12,11 @@ export { issueLinkApi } from './issueLinkApi';
 export { attachmentApi } from './attachmentApi';
 export { codeLinkApi } from './codeLinkApi';
 export { githubRepoApi } from './githubRepoApi';
+export { labelApi } from './labelApi';
+export { searchApi } from './searchApi';
+export { aiApi } from './aiApi';
 
-export type { LoginRequest, AuthTokenResponse } from './authApi';
+export type { LoginRequest, AuthTokenResponse, DemoAccountDto } from './authApi';
 export type { UserDto, CreateUserRequest } from './userApi';
 export type { GroupDto, CreateGroupRequest } from './groupApi';
 export type { SpaceDto, CreateSpaceRequest, AddMemberRequest } from './spaceApi';
@@ -23,6 +27,51 @@ export type { IssueHistoryDto } from './historyApi';
 export type { IssueLinkDto, CreateIssueLinkRequest } from './issueLinkApi';
 export type { IssueAttachmentDto } from './attachmentApi';
 export type { IssueCodeLinkDto, CreateIssueCodeLinkRequest, CodeLinkKind, RefreshResult, GithubTokenBody } from './codeLinkApi';
+export type { LabelDto } from './labelApi';
+export type { SearchResultDto } from './searchApi';
+export type {
+  TaskDraftDto,
+  DraftTaskResponse,
+  EpicDraftDto,
+  IssueDraftDto,
+  SprintBucketDto,
+  PlanEpicResponse,
+  ChangeSummaryDto,
+  CitationDto,
+  ChatTurnDto,
+  AskMode,
+  HistorySummaryDto,
+  ModelUsageDto,
+  AskResponseDto,
+  ClarificationOptionDto,
+  SemanticSearchHitDto,
+  SemanticSearchResponseDto,
+  FlaggedIssueDto,
+  SprintRiskLevel,
+  SprintPaceRequestDto,
+  SprintPaceResponseDto,
+  PrecedentDto,
+  PrecedentResponseDto,
+  DescriptionFindingDto,
+  DescriptionReviewResponseDto,
+  CommentDigestInputDto,
+  AttributedPointDto,
+  ActionItemDto,
+  CommentDigestResponseDto,
+  RolloutStatus,
+  RolloutPlanDto,
+  RolloutStatusDto,
+  RolloutSprintTargetDto,
+  RecoveryStatus,
+  RecoveryActionType,
+  RecoveryActionDto,
+  RecoveryPlanDto,
+  RecoveryHypothesisDto,
+  RecoveryEvidenceDto,
+  RecoveryStatusDto,
+  ActiveRecoveryLookupDto,
+  RecoveryCheckpointDto,
+} from './aiApi';
 export type {
   SpaceGithubRepoDto,
   CreateSpaceGithubRepoRequest,
